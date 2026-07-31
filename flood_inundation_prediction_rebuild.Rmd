@@ -1,0 +1,819 @@
+---
+title: "Flood Inundation Modeling in Calgary and Pittsburgh"
+subtitle: "Version 3: full R rebuild, no ArcGIS dependency"
+output: html_document
+---
+
+# Introduction
+
+Floods are one of the most devastating natural disasters, causing widespread damage to communities and infrastructure. This analysis builds a predictive model of flood inundation probability in Calgary, Alberta, then transfers it to Pittsburgh, Pennsylvania to test how the model performs in a different context.
+
+The fishnet, distance, slope, elevation, and land cover features are all generated in code from open data, replacing the previous ArcGIS workflow. The dependent variable is now Calgary's official 1:100 flood extent (1% annual chance), replacing the satellite-derived classification.
+
+Click to watch our [presentation video](https://www.youtube.com/watch?v=l8quCz-AnGw)🎉
+
+From the city of Calgary we can see that Calgary is at its greatest risk of flooding during spring and summer. Calgary's 2013 flood displaced roughly 80,000 residents and remains the reference event for the city's flood planning. The Front Range of Colorado flooded the same year under similar foothills rainfall. Additionally, heavy rainfall on the melting snowpack in the Rocky Mountains combined with steep, rocky terrain caused rapid and intense flooding in southern-Alberta watersheds. Flooding disrupted businesses, damaged critical infrastructure and also led to power outages across Calgary.
+
+As a river city, it is important to prepare, respond and adapt to floods. Every spring, the city of Calgary actively monitor the rivers for flooding. They continuously improve the flood forecasting to provide citizens with the earliest possible warning. Therefore, the information from this analysis can be used by city planners in Calgary to make informed decisions about land use, infrastructure development, and emergency preparedness. To deploy such an algorithm, we would first need to validate and refine the model using historical flood data and other relevant features. Once we have a model that fits well, we can use it to generate flood inundation maps for Calgary, and also the comparable cities.
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 999, tigris_class = "sf", tigris_use_cache = TRUE)
+
+# install.packages(c("terra", "elevatr", "exactextractr", "FedData"))
+library(sf)
+library(terra)
+library(elevatr)
+library(exactextractr)
+library(FedData)
+library(tigris)
+library(tidycensus)
+library(tidyverse)
+library(caret)
+library(pROC)
+library(plotROC)
+library(stargazer)
+library(AICcmodavg)
+library(ggpubr)
+library(kableExtra)
+library(reshape2)
+library(leaflet)
+library(ggplot2)
+library(jtools)
+```
+
+```{r message=FALSE, warning=FALSE}
+source("https://raw.githubusercontent.com/urbanSpatial/Public-Policy-Analytics-Landing/master/functions.r")
+
+mapTheme <- theme_nice() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+
+# Projected CRS for measurement (meters)
+crs_calgary <- 32611   # UTM 11N
+crs_pgh     <- 32617   # UTM 17N
+```
+
+# Data Acquisition
+
+All Calgary layers come from Open Calgary:
+
+-   Hydrology
+
+-   City boundary
+
+-   The 1 in 100 year flood extent from Open Calgary
+
+-   The Citywide Land Cover composite from Open Calgary
+
+-   Elevation from SRTM through the elevatr package.
+
+The inundation label is Calgary's official 1 in 100 year flood extent, a modeled steady state hazard rather than a single observed event, which makes the label consistent with how planners define regulatory risk.
+
+Elevation joins slope because water pools where land is low, and the two together separate valley floors from valley walls. Soil properties are excluded because no open programmatic source covers Calgary, a choice named plainly in the limitations.
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+Boundary <- st_read("https://data.calgary.ca/resource/erra-cqp9.geojson?$limit=50000") %>%
+  st_union() %>%
+  st_transform(crs_calgary)
+
+Rivers <- st_read("https://data.calgary.ca/resource/5fk8-xqeu.geojson?$limit=50000") %>%
+  st_transform(crs_calgary)
+
+# Dependent variable source: 1:100 flood extent (1% chance in any year)
+Flood100 <- st_read("https://data.calgary.ca/resource/w8wn-kuii.geojson?$limit=50000") %>%
+  st_transform(crs_calgary) %>%
+  st_union()
+
+# Citywide Land Cover (composite, 2015): full export, cached to disk.
+# The Socrata resource endpoint caps at the $limit, which truncated the
+# 544,919-polygon layer, so the geospatial export endpoint is used instead.
+if (!file.exists("landcover_calgary.geojson")) {
+  options(timeout = 3600)
+  download.file("https://data.calgary.ca/api/geospatial/as2i-6z3n?method=export&format=GeoJSON",
+                "landcover_calgary.geojson", mode = "wb")
+}
+
+Landcover <- st_read("landcover_calgary.geojson") %>%
+  st_transform(crs_calgary)
+```
+
+```{r}
+# Reclassify landcover to a permeability score, matching the original scheme:
+# NatCover = 0, StormPond = 0, Permeable = 0, Impermeable = 1.
+# str_detect on "imperm" is used deliberately: the source data spells the
+# category "Impermable" (sic), so an exact match would silently fail.
+nrow(Landcover)
+
+Landcover <- Landcover %>%
+  mutate(imperm = ifelse(str_detect(tolower(ldscmetric), "imperm"), 1, 0))
+
+table(Landcover$ldscmetric, Landcover$imperm)
+```
+
+# Feature Engineering
+
+## Fishnet
+
+The fishnet is generated with st_make_grid at a 1,000 m cell size, which yields roughly the same cell count as the original analysis (\~800 cells). The fishnet divides Calgary into 3604 cells of 500 meters. A cell is labeled inundated when more than five percent of its area falls inside the 1 in 100 year flood extent, which screens out sliver intersections at polygon edges. 327 cells carry the inundation label. The inundated cells trace the Bow and Elbow valleys and the Nose Creek corridor.
+
+```{r warning=FALSE}
+final_fishnet <- st_make_grid(Boundary, cellsize = 500, square = TRUE) %>%
+  st_sf() %>%
+  .[Boundary, ] %>%
+  mutate(Unique_ID = row_number())
+
+nrow(final_fishnet)
+```
+
+Each ArcGIS flowchart step has a direct R equivalent: Euclidean distance becomes st_distance, slope comes from terra::terrain on an elevatr DEM, and zonal statistics as table becomes exact_extract.
+
+## Distance to Rivers
+
+```{r warning=FALSE, message=FALSE}
+cents <- st_centroid(final_fishnet)
+river_union <- st_union(Rivers)
+
+final_fishnet$Mean_Distance_to_River <-
+  as.numeric(st_distance(cents, river_union))
+```
+
+## Slope and Elevation
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+# Explicit namespaces throughout: the raster package, if attached, masks
+# terra::terrain and dplyr::select, which breaks this chunk silently.
+dem   <- terra::rast(elevatr::get_elev_raster(locations = final_fishnet,
+                                              z = 11, clip = "bbox"))
+slope <- terra::terrain(dem, v = "slope", unit = "degrees")
+
+final_fishnet$average_slope_degree <- exactextractr::exact_extract(slope, final_fishnet, "mean")
+final_fishnet$mean_elevation       <- exactextractr::exact_extract(dem,   final_fishnet, "mean")
+```
+
+## Landcover Permeability
+
+The 544,919 landcover polygons are rasterized at 10 m and averaged per cell with exact_extract, which reproduces the original mean-of-reclassified-raster logic and runs in minutes rather than the hours a polygon intersection would take.
+
+```{r warning=FALSE, message=FALSE}
+template <- terra::rast(terra::vect(final_fishnet), resolution = 10)
+lc_rast  <- terra::rasterize(terra::vect(Landcover), template,
+                             field = "imperm", background = 0)
+
+final_fishnet$landcover_scale <-
+  exactextractr::exact_extract(lc_rast, final_fishnet, "mean")
+
+# Sanity check: must show real spread, not a constant. If this prints all
+# zeros, Landcover$imperm was overwritten; rerun from the reclassify chunk.
+summary(final_fishnet$landcover_scale)
+```
+
+## Dependent Variable: 1:100 Flood Extent
+
+A cell is classified as inundated if more than 5% of its area falls inside the official 1:100 flood extent. The threshold screens out sliver intersections at polygon edges.
+
+```{r warning=FALSE, message=FALSE}
+flood_int <- st_intersection(
+  st_sf(geometry = Flood100),
+  final_fishnet %>% select(Unique_ID)
+) %>%
+  mutate(a = as.numeric(st_area(.))) %>%
+  st_drop_geometry() %>%
+  group_by(Unique_ID) %>%
+  summarise(flood_area = sum(a), .groups = "drop")
+
+final_fishnet <- final_fishnet %>%
+  left_join(flood_int, by = "Unique_ID") %>%
+  mutate(cell_area  = as.numeric(st_area(.)),
+         flood_frac = replace_na(flood_area, 0) / cell_area,
+         Inundation = factor(ifelse(flood_frac > 0.05, 1, 0)))
+
+table(final_fishnet$Inundation)
+```
+
+```{r}
+final_fishnet_wgs <- st_transform(final_fishnet, 4326)
+
+ggplot() +
+  geom_sf(data = final_fishnet_wgs,
+          color = "white",
+          size = 1,
+          aes(fill = Inundation)) +
+  labs(title = "Flood Inundation in Calgary, Canada",
+       subtitle = "1:100 flood extent, cell coverage > 5%",
+       fill = "Inundation",
+       caption = "Data: Calgary Open Data") +
+  scale_fill_manual(values = c("#d3dbed", "#08306B"),
+                    labels = c("No Inundation", "Inundation")) +
+  mapTheme
+```
+
+## Feature Maps
+
+```{r}
+ggplot() +
+  geom_sf(data = final_fishnet_wgs, aes(fill = Mean_Distance_to_River)) +
+  labs(title = "Average Distance to River",
+       fill = "Distance(Meter)",
+       caption = "Data: Calgary Open Data") +
+  scale_fill_gradient(low = "#08306B", high = "#F7FBFF",
+                      guide = guide_colorbar(reverse = TRUE)) +
+  mapTheme
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = final_fishnet_wgs, aes(fill = average_slope_degree)) +
+  labs(title = "Average Slope Degree",
+       fill = "Degree(\u00b0)",
+       caption = "Data: SRTM via elevatr") +
+  scale_fill_gradient(low = "#F7FBFF", high = "#08306B",
+                      guide = guide_colorbar(reverse = TRUE)) +
+  mapTheme
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = final_fishnet_wgs, aes(fill = mean_elevation)) +
+  labs(title = "Mean Elevation",
+       fill = "Elevation(Meter)",
+       caption = "Data: SRTM via elevatr") +
+  scale_fill_gradient(low = "#F7FBFF", high = "#08306B",
+                      guide = guide_colorbar(reverse = TRUE)) +
+  mapTheme
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = final_fishnet_wgs, aes(fill = landcover_scale)) +
+  labs(title = "Summary of Landcover Permeability",
+       fill = "Index",
+       caption = "Data: Calgary Open Data") +
+  scale_fill_gradient(low = "#F7FBFF", high = "#08306B",
+                      guide = guide_colorbar(reverse = TRUE)) +
+  mapTheme
+```
+
+```{r}
+st_drop_geometry(final_fishnet) %>%
+  dplyr::select(Inundation, Mean_Distance_to_River, average_slope_degree,
+                mean_elevation, landcover_scale) %>%
+  gather(Variable, value, -Inundation) %>%
+  ggplot(aes(Inundation, value, fill = Inundation)) +
+  geom_bar(position = "dodge",
+           stat = "summary",
+           fun = "mean",
+           width = 0.6) +
+  facet_wrap(~Variable, scales = "free") +
+  labs(x = "Inundation",
+       y = "Value",
+       title = "Feature associations with the likelihood of Flood Inundation",
+       subtitle = "in Calgary, Canada",
+       caption = "Data: Calgary Open Data") +
+  guides(fill = guide_legend(title = "Flood Inundation")) +
+  scale_fill_manual(values = c("#e8edbe", "#08306B")) +
+  theme_nice()
+```
+
+# Standardization
+
+Features are standardized within each city before modeling, so each coefficient is the change in flood odds per standard deviation and the coefficients are directly comparable. Standardization is also what makes the cross city transfer defensible, since the Calgary landcover index and the NLCD impervious fraction are different instruments measuring the same quantity.
+
+```{r}
+scale_vars <- c("Mean_Distance_to_River", "average_slope_degree",
+                "mean_elevation", "landcover_scale")
+# If you obtain AGRASID soil data later, engineer soil_material the same way
+# as landcover_scale above and add it to scale_vars.
+
+final_data <- final_fishnet %>%
+  st_drop_geometry() %>%
+  select(Unique_ID, Inundation, all_of(scale_vars)) %>%
+  mutate(across(all_of(scale_vars), ~ as.numeric(scale(.))))
+```
+
+# Regression Model
+
+```{r}
+set.seed(3456)
+trainIndex <- createDataPartition(final_data$Inundation, p = .70,
+                                  list = FALSE, times = 1)
+train <- final_data[trainIndex, ]
+test  <- final_data[-trainIndex, ]
+
+dim(train)
+dim(test)
+```
+
+```{r}
+reg <- glm(Inundation ~ .,
+           data = train %>% dplyr::select(-Unique_ID),
+           family = "binomial"(link = "logit"))
+```
+
+## Summary
+
+```{r warning=FALSE, message=FALSE, results='asis'}
+stargazer(reg,
+          type = "html",
+          title = "Regression Model Predicting Flood Inundation Probability in Calgary, Alberta",
+          column.labels = "Model",
+          add.lines = list(c("Corrected AIC", round(AICc(reg), 1))))
+```
+
+## Correlation Matrix
+
+At the tuned threshold the model finds 90 of 98 flooded test cells, a sensitivity of 0.92, with specificity 0.87 and balanced accuracy 0.89. Raw accuracy is 0.87 and the no information rate is 0.91, which looks damning until you see why. A model that predicts dry everywhere scores 91 percent for free, so accuracy alone cannot evaluate a rare outcome. Sensitivity, balanced accuracy, and AUC are the metrics that matter here, and precision is read against the base rate. A flagged cell carries a 41 percent flood share against a 9 percent baseline, a more than fourfold concentration of risk.
+
+```{r}
+numeric_cols <- c("Inundation", scale_vars)
+train_numeric <- as.data.frame(lapply(train[numeric_cols], as.numeric))
+melted_cor_matrix <- melt(cor(train_numeric))
+
+ggplot(data = melted_cor_matrix,
+       aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "#e8edbe",
+                       mid = "white",
+                       high = "#08306B",
+                       midpoint = 0,
+                       limit = c(-1, 1),
+                       space = "Lab",
+                       name = "Pearson\nCorrelation") +
+  theme_nice() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, vjust = 1),
+        axis.text.y = element_text(hjust = 1, vjust = 1)) +
+  labs(x = "", y = "")
+```
+
+## 
+
+## Classification Probabilities
+
+```{r}
+classProbs <- predict(reg, test, type = "response")
+
+testProbs <- data.frame(obs = as.factor(test$Inundation),
+                        pred = classProbs)
+rocObj <- roc(testProbs$obs, testProbs$pred, quiet = TRUE)
+optThresh <- coords(rocObj, "best", ret = "threshold",
+                    best.method = "youden")$threshold
+optThresh # Optimal Threshold
+
+ggplot(testProbs, aes(x = pred, fill = as.factor(obs))) +
+  geom_density() +
+  facet_grid(obs ~ .) +
+  xlab("Probability") +
+  geom_vline(xintercept = optThresh) +
+  scale_fill_manual(values = c("#e8edbe", "#08306B"),
+                    labels = c("No Inundation", "Inundation"),
+                    name = "") +
+  labs(title = "Distribution of Predicted Probabilities for Inundation vs. No Inundation",
+       x = "Probability", y = "Density") +
+  theme_nice()
+```
+
+## ROC Curve
+
+```{r}
+best <- coords(rocObj, "best", best.method = "youden",
+               ret = c("threshold", "specificity", "sensitivity"))
+
+ggplot(testProbs, aes(d = as.numeric(obs), m = pred)) +
+  geom_roc(n.cuts = 0, color = "#08306B") +
+  geom_abline(slope = 1, intercept = 0, size = 1.5, color = "#e8edbe") +
+  geom_point(aes(x = 1 - best$specificity, y = best$sensitivity),
+             color = "#08306B", size = 3, inherit.aes = FALSE) +
+  annotate("text",
+           x = 1 - best$specificity + 0.16, y = best$sensitivity - 0.03,
+           label = paste0("threshold = ", round(best$threshold, 2)),
+           size = 3.5, color = "#08306B") +
+  labs(title = "ROC curve with Youden optimal threshold",
+       x = "False positive fraction", y = "True positive fraction") +
+  theme_nice()
+```
+
+## Confusion Matrix
+
+```{r}
+testProbs$predOutcome <- ifelse(testProbs$pred > optThresh, 1, 0)
+
+caret::confusionMatrix(reference = as.factor(testProbs$obs),
+                       data = as.factor(testProbs$predOutcome),
+                       positive = "1")
+```
+
+## ROC
+
+```{r warning=FALSE}
+pROC::auc(testProbs$obs, testProbs$pred)
+```
+
+# Cross Validation
+
+Ten fold cross validation puts mean accuracy at 0.92. The harder test is spatial. Neighboring cells are nearly identical, so a random split leaks spatial information and flatters the model. Training on the western half of Calgary and predicting the east gives the honest estimate of performance in unseen territory. Discrimination survives almost untouched, with an AUC of 0.95, while calibration does not. The eastern predictions over flag heavily, with precision falling to 0.23. The model ranks risk almost perfectly in new territory but its absolute probabilities shift. This single result dictates how the city transfers are presented, as relative risk surfaces in quantile bins rather than literal probabilities.
+
+```{r message=FALSE, warning=FALSE}
+ctrl <- trainControl(method = "cv", number = 10, savePredictions = TRUE)
+
+cvFit <- train(Inundation ~ .,
+               data = final_data %>% dplyr::select(-Unique_ID),
+               method = "glm",
+               family = "binomial",
+               trControl = ctrl)
+cvFit
+```
+
+```{r warning=FALSE, message=FALSE}
+dplyr::select(cvFit$resample, -Resample) %>%
+  gather(metric, value) %>%
+  left_join(gather(cvFit$results[2:4], metric, mean)) %>%
+  ggplot(aes(value)) +
+  geom_histogram(bins = 30, fill = "#e8edbe") +
+  facet_wrap(~metric) +
+  geom_vline(aes(xintercept = mean), color = "#08306B",
+             linetype = 1, size = 0.5) +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(x = "Goodness of Fit", y = "Count",
+       title = "CV Goodness of Fit Metrics",
+       subtitle = "Across-fold mean represented as lines") +
+  theme_nice()
+```
+
+# Spatial Holdout Validation
+
+The model trains on the western half of Calgary and predicts the eastern half, giving an honest estimate of generalization to unseen areas.
+
+```{r warning=FALSE, message=FALSE}
+final_data$lon <- st_coordinates(st_centroid(final_fishnet))[, 1]
+
+spat_train <- final_data %>% filter(lon <  median(lon)) %>% select(-lon)
+spat_test  <- final_data %>% filter(lon >= median(lon)) %>% select(-lon)
+
+reg_spat <- glm(Inundation ~ .,
+                data = spat_train %>% dplyr::select(-Unique_ID),
+                family = "binomial"(link = "logit"))
+
+spatProbs <- data.frame(obs = as.factor(spat_test$Inundation),
+                        pred = predict(reg_spat, spat_test, type = "response"))
+spatProbs$predOutcome <- ifelse(spatProbs$pred > optThresh, 1, 0)
+
+caret::confusionMatrix(reference = as.factor(spatProbs$obs),
+                       data = as.factor(spatProbs$predOutcome),
+                       positive = "1")
+
+pROC::auc(spatProbs$obs, spatProbs$pred)
+
+final_data <- final_data %>% select(-lon)
+```
+
+# Prediction Map
+
+In this step, we are going to predict for the entire dataset , assess our predictions, and create some maps. This fishnet map shows that the areas with a higher probability of flooding are concentrated in the central and western parts of the city along the rivers, where the slope is steeper and also closer to the waterbodies. And in some areas in the east where the ground cover is less permeable and closer to water bodies, there is also a certain probability of flood inundation.
+
+```{r}
+allPredictions <- predict(cvFit, final_data, type = "prob")[, 2]
+
+final_data_sf <- final_fishnet_wgs %>%
+  select(Unique_ID, Inundation) %>%
+  cbind(allPredictions) %>%
+  mutate(allPredictions = round(allPredictions * 100))
+```
+
+```{r}
+final_data_sf <- final_data_sf %>%
+  mutate(prob_quintile = cut(allPredictions,
+                             breaks = unique(quantile(allPredictions,
+                                                      probs = seq(0, 1, 0.2))),
+                             include.lowest = TRUE))
+pal  <- c("#d1d6c5", "#E8EDBE", "#c5cbe0", "#3b588f", "#08306B")
+nlev <- nlevels(final_data_sf$prob_quintile)
+
+ggplot() +
+  geom_sf(data = final_data_sf,
+          aes(fill = prob_quintile),
+          colour = "white",
+          size = 0.8) +
+  scale_fill_manual(values = pal[round(seq(1, 5, length.out = nlev))],
+                    name = "Predicted\nProbabilities(%)\n(Quintile\nBreaks)") +
+  mapTheme +
+  labs(title = "Spatial Distribution of Predicted Probabilities",
+       subtitle = "in Calgary, Alberta",
+       caption = "Data: Calgary Open Data")
+```
+
+```{r}
+final_data_sf %>%
+  mutate(confResult = case_when(
+    allPredictions <  optThresh * 100 & Inundation == 0 ~ "True_Negative",
+    allPredictions >= optThresh * 100 & Inundation == 1 ~ "True_Positive",
+    allPredictions <  optThresh * 100 & Inundation == 1 ~ "False_Negative",
+    allPredictions >= optThresh * 100 & Inundation == 0 ~ "False_Positive")) %>%
+  ggplot() +
+  geom_sf(aes(fill = confResult),
+          color = "white",
+          size = 0.8) +
+  scale_fill_manual(values = c("#08306B", "#9da7c9", "#c5cbe0", "#E8EDBE"),
+                    name = "Outcomes") +
+  labs(title = "Confusion Metrics",
+       subtitle = "in Calgary, Alberta",
+       caption = "Data: Calgary Open Data") +
+  mapTheme
+```
+
+# Comparable Cities
+
+Two US cities test the model's transferability in different ways. Denver is a semi-arid continental city at the Rocky Mountain foothills, built along the South Platte River and Cherry Creek, with flooding driven by snowmelt and intense convective rainfall. Minneapolis is riverine and continental like Calgary, but on flat prairie terrain along the Mississippi.
+
+If the model performs well in Denver and degrades in Minneapolis, it encodes foothills-valley hydrology specifically rather than a universal flood signature.
+
+Because the spatial holdout showed the model ranks risk far better than it calibrates absolute probabilities in unseen territory, both cities are presented as relative risk surfaces in quantile bins rather than literal probabilities.
+
+```{r message=FALSE, warning=FALSE}
+build_city_data <- function(place, state, county, crs_city, cellsize = 500) {
+  boundary <- tigris::places(state = state, cb = TRUE) %>%
+    filter(NAME == place) %>%
+    st_transform(crs_city)
+
+  water <- tigris::area_water(state = state, county = county) %>%
+    st_transform(crs_city) %>%
+    filter(!is.na(FULLNAME))
+
+  net <- st_make_grid(boundary, cellsize = cellsize, square = TRUE) %>%
+    st_sf() %>%
+    .[boundary, ] %>%
+    mutate(uniqueID = row_number())
+
+  # Distance to water
+  net$Mean_Distance_to_River <-
+    as.numeric(st_distance(st_centroid(net), st_union(water)))
+
+  # Slope and elevation (explicit namespaces; raster pkg masking-proof)
+  dem <- terra::rast(elevatr::get_elev_raster(locations = net,
+                                              z = 11, clip = "bbox"))
+  slp <- terra::terrain(dem, v = "slope", unit = "degrees")
+  net$average_slope_degree <- exactextractr::exact_extract(slp, net, "mean")
+  net$mean_elevation       <- exactextractr::exact_extract(dem, net, "mean")
+
+  # Annual NLCD 2023 fractional impervious, Collection 1.1, streamed via GDAL.
+  # Tries the S3 GeoTIFF first, falls back to the MRLC data-bundle zip.
+  imp <- tryCatch(
+    terra::rast("/vsicurl/https://s3-us-west-2.amazonaws.com/mrlc/Annual_NLCD_FctImp_2023_CU_C1V1.tif"),
+    error = function(e) terra::rast(
+      "/vsizip//vsicurl/https://www.mrlc.gov/downloads/sciweb1/shared/mrlc/data-bundles/Annual_NLCD_FctImp_2023_CU_C1V1.zip/Annual_NLCD_FctImp_2023_CU_C1V1.tif")
+  )
+
+  net_aea <- st_transform(net, terra::crs(imp))
+  imp_c   <- terra::crop(imp, terra::vect(net_aea))
+  net$landcover_scale <-
+    exactextractr::exact_extract(imp_c, net_aea, "mean") / 100
+
+  list(boundary = boundary, water = water, fishnet = net)
+}
+
+predict_city <- function(city) {
+  d <- st_transform(city$fishnet, 4326) %>%
+    select(all_of(scale_vars)) %>%
+    mutate(across(all_of(scale_vars), ~ as.numeric(scale(.))))
+  d$predicted <- predict(reg, newdata = d, type = "response")
+  d
+}
+```
+
+## Build Both Cities
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+denver      <- build_city_data("Denver",      "CO", "Denver",   32613)
+minneapolis <- build_city_data("Minneapolis", "MN", "Hennepin", 32615)
+
+denver_pred <- predict_city(denver)
+mpls_pred   <- predict_city(minneapolis)
+```
+
+```{r}
+summary(denver_pred$predicted)
+summary(mpls_pred$predicted)
+```
+
+## Feature Maps
+
+```{r message=FALSE, warning=FALSE}
+plot_city_features <- function(city, city_name) {
+  net_wgs <- st_transform(city$fishnet, 4326)
+  bnd_wgs <- st_transform(city$boundary, 4326)
+
+  small <- theme(plot.title = element_text(size = 10),
+                 legend.title = element_text(size = 6))
+
+  a <- ggplot() +
+    geom_sf(data = net_wgs, aes(fill = Mean_Distance_to_River), color = "white") +
+    geom_sf(data = bnd_wgs, color = "black", fill = "transparent") +
+    labs(title = "Average Distance to River", fill = "Distance") +
+    scale_fill_gradient(low = "#bcc47a", high = "#F7FBFF",
+                        guide = guide_colorbar(reverse = TRUE)) +
+    mapTheme + small
+
+  b <- ggplot() +
+    geom_sf(data = net_wgs, aes(fill = average_slope_degree), color = "white") +
+    geom_sf(data = bnd_wgs, color = "black", fill = "transparent") +
+    labs(title = "Average Slope Degree", fill = "Degree(\u00b0)") +
+    scale_fill_gradient(low = "#F7FBFF", high = "#bcc47a",
+                        guide = guide_colorbar(reverse = TRUE)) +
+    mapTheme + small
+
+  c <- ggplot() +
+    geom_sf(data = net_wgs, aes(fill = mean_elevation), color = "white") +
+    geom_sf(data = bnd_wgs, color = "black", fill = "transparent") +
+    labs(title = "Mean Elevation", fill = "Elevation(m)") +
+    scale_fill_gradient(low = "#F7FBFF", high = "#bcc47a",
+                        guide = guide_colorbar(reverse = TRUE)) +
+    mapTheme + small
+
+  d <- ggplot() +
+    geom_sf(data = net_wgs, aes(fill = landcover_scale), color = "white") +
+    geom_sf(data = bnd_wgs, color = "black", fill = "transparent") +
+    labs(title = "Summary of Landcover Permeability", fill = "Index") +
+    scale_fill_gradient(low = "#F7FBFF", high = "#bcc47a",
+                        guide = guide_colorbar(reverse = TRUE)) +
+    mapTheme + small
+
+  ggarrange(a, b, c, d, ncol = 2, nrow = 2) %>%
+    annotate_figure(top = text_grob(city_name, size = 12))
+}
+
+plot_city_features(denver, "Denver, CO")
+plot_city_features(minneapolis, "Minneapolis, MN")
+```
+
+## Prediction Maps
+
+Denver mirrors Calgary. The median predicted probability is under one percent, mass sits near zero, and the upper tail is bounded at 0.61, tracing the South Platte corridor and the northwest lowlands. The distribution's shape matches Calgary's.
+
+Minneapolis is the revealing case. The median is even lower than Denver's but the tail runs to 0.99 and the mean is ten times Denver's. On flat terrain the elevation and slope features carry almost no variation, the model collapses onto distance to water, and predictions saturate along the Mississippi trench and the Chain of Lakes. The map shows a hard band hugging the water with near zero everywhere else. The model has degenerated into a river buffer, which is precisely the failure mode the design was built to expose.
+
+```{r message=FALSE, warning=FALSE}
+plot_city_prediction <- function(pred, city, city_name, data_caption) {
+  pal <- c("#d1d6c5", "#E8EDBE", "#c5cbe0", "#3b588f", "#08306B")
+
+  pred <- pred %>%
+    mutate(pred_pct = round(predicted * 100),
+           risk_bin = cut(pred_pct,
+                          breaks = unique(quantile(pred_pct,
+                                                   probs = seq(0, 1, 0.2))),
+                          include.lowest = TRUE))
+  nlev <- nlevels(pred$risk_bin)
+  bb <- st_bbox(pred)
+  ggplot() +
+    geom_sf(data = pred, aes(fill = risk_bin), colour = "white", size = 0.1) +
+    geom_sf(data = st_transform(city$boundary, 4326),
+            color = "black", fill = "transparent") +
+    geom_sf(data = st_transform(city$water, 4326),
+            fill = "#08306B", color = "#08306B", alpha = 0.3) +
+    scale_fill_manual(values = pal[round(seq(1, 5, length.out = nlev))],
+                      name = "Relative Flood\nRisk(%)\n(Quantile\nBreaks)") +
+    mapTheme +
+    labs(title = paste("Relative Flood Risk in", city_name),
+         caption = data_caption) +
+    coord_sf(xlim = c(bb["xmin"] - 0.01, bb["xmax"] + 0.01),
+             ylim = c(bb["ymin"] - 0.01, bb["ymax"] + 0.01))
+}
+
+plot_city_prediction(denver_pred, denver, "Denver, CO",
+                     "Data: US Census TIGER, Annual NLCD 2023, SRTM")
+plot_city_prediction(mpls_pred, minneapolis, "Minneapolis, MN",
+                     "Data: US Census TIGER, Annual NLCD 2023, SRTM")
+```
+
+```{r}
+city_preds <- bind_rows(
+  tibble(city = "Calgary",
+         predicted = predict(cvFit, final_data, type = "prob")[, 2]),
+  tibble(city = "Denver",      predicted = denver_pred$predicted),
+  tibble(city = "Minneapolis", predicted = mpls_pred$predicted))
+
+ggplot(city_preds, aes(x = predicted, color = city, fill = city)) +
+  geom_density(alpha = 0.25, size = 0.8) +
+  scale_color_manual(values = c("#08306B", "#3b588f", "#bcc47a")) +
+  scale_fill_manual(values = c("#08306B", "#3b588f", "#bcc47a")) +
+  scale_x_sqrt(breaks = c(0.01, 0.1, 0.25, 0.5, 0.75, 1)) +
+  coord_cartesian(ylim = c(0, 12)) +
+  labs(title = "Predicted probability distributions across three cities",
+       subtitle = "square root x scale; Minneapolis shows the saturated tail",
+       x = "Predicted probability", y = "Density",
+       color = NULL, fill = NULL) +
+  theme_nice()
+```
+
+# Environmental Justice Overlay
+
+Predicted risk was joined to tract level poverty rates from the 2023 ACS in both US cities. In Denver the relationship is positive and significant, r equals 0.23 with p equal to 0.003 across 176 tracts. Higher poverty tracts carry systematically higher predicted flood risk, an association consistent with the documented environmental justice geography of the South Platte corridor through Globeville and Elyria Swansea.
+
+In Minneapolis the correlation is null, r equals 0.05 with p equal to 0.56. Two readings of the null are observationally equivalent and both are reported. Riverfront and lakefront proximity in Minneapolis may genuinely be decoupled from poverty, since much of that frontage skews affluent. Or the model's terrain starved predictions there are too crude to detect a real pattern.
+
+The spatial holdout results give reason to take the second reading seriously, which means the null is a statement about this model in this terrain, not a finding that Minneapolis has no flood equity problem.
+
+```{r message=FALSE, warning=FALSE}
+# Requires a Census API key: census_api_key("YOUR_KEY", install = TRUE)
+ej_overlay <- function(pred, state, county, city_name) {
+  tracts <- get_acs(geography = "tract",
+                    state = state,
+                    county = county,
+                    year = 2023,
+                    variables = c(medInc = "B19013_001",
+                                  povCount = "B17001_002",
+                                  totPop = "B17001_001"),
+                    geometry = TRUE,
+                    output = "wide") %>%
+    st_transform(4326) %>%
+    mutate(pctPoverty = povCountE / totPopE)
+
+  risk_by_tract <- st_join(tracts, pred %>% select(predicted)) %>%
+    st_drop_geometry() %>%
+    group_by(GEOID, pctPoverty, medIncE) %>%
+    summarise(meanRisk = mean(predicted, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(meanRisk), !is.na(pctPoverty))
+
+  p <- ggplot(risk_by_tract, aes(x = pctPoverty, y = meanRisk)) +
+    geom_point(color = "#08306B", alpha = 0.6) +
+    geom_smooth(method = "lm", color = "#bcc47a", se = TRUE) +
+    labs(title = "Predicted Flood Risk vs. Poverty Rate by Tract",
+         subtitle = city_name,
+         x = "Poverty Rate",
+         y = "Mean Predicted Flood Probability",
+         caption = "Data: ACS 2023 5-year estimates") +
+    theme_nice()
+  print(p)
+
+  cor.test(risk_by_tract$pctPoverty, risk_by_tract$meanRisk)
+}
+
+ej_overlay(denver_pred, "CO", "Denver",   "Denver, CO")
+ej_overlay(mpls_pred,   "MN", "Hennepin", "Minneapolis, MN")
+```
+
+```{r}
+ej_overlay <- function(pred, state, county, city_name) {
+  tracts <- get_acs(geography = "tract", state = state, county = county,
+                    year = 2023,
+                    variables = c(medInc = "B19013_001",
+                                  povCount = "B17001_002",
+                                  totPop = "B17001_001"),
+                    geometry = TRUE, output = "wide") %>%
+    st_transform(4326) %>%
+    mutate(pctPoverty = povCountE / totPopE)
+
+  st_join(tracts, pred %>% select(predicted)) %>%
+    st_drop_geometry() %>%
+    group_by(GEOID, pctPoverty, medIncE) %>%
+    summarise(meanRisk = mean(predicted, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(meanRisk), !is.na(pctPoverty)) %>%
+    mutate(city = city_name)
+}
+
+ej_all <- bind_rows(
+  ej_overlay(denver_pred, "CO", "Denver",   "Denver, CO"),
+  ej_overlay(mpls_pred,   "MN", "Hennepin", "Minneapolis, MN"))
+
+ggplot(ej_all, aes(x = pctPoverty, y = meanRisk)) +
+  geom_point(color = "#08306B", alpha = 0.6) +
+  geom_smooth(method = "lm", color = "#bcc47a", se = TRUE) +
+  facet_wrap(~city, scales = "free") +
+  labs(title = "Predicted flood risk and poverty rate by tract",
+       subtitle = "Denver r = 0.23 (p = 0.003), Minneapolis r = 0.05 (p = 0.56)",
+       x = "Poverty rate", y = "Mean predicted flood probability",
+       caption = "Data: ACS 2023 5-year estimates") +
+  theme_nice()
+```
+
+# Export for D3
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+dir.create("docs", showWarnings = FALSE)
+
+final_data_sf %>%
+  select(Inundation, allPredictions) %>%
+  st_write("docs/calgary.geojson", delete_dsn = TRUE)
+
+denver_pred %>%
+  mutate(predicted = round(predicted, 3)) %>%
+  select(predicted) %>%
+  st_write("docs/denver.geojson", delete_dsn = TRUE)
+
+mpls_pred %>%
+  mutate(predicted = round(predicted, 3)) %>%
+  select(predicted) %>%
+  st_write("docs/minneapolis.geojson", delete_dsn = TRUE)
+```
+
+```{r}
+final_fishnet_wgs %>%
+  select(Unique_ID, Inundation, all_of(scale_vars)) %>%
+  left_join(st_drop_geometry(final_data_sf) %>% select(Unique_ID, allPredictions),
+            by = "Unique_ID") %>%
+  mutate(across(all_of(scale_vars), ~ round(., 2))) %>%
+  select(-Unique_ID) %>%
+  st_write("docs/calgary.geojson", delete_dsn = TRUE)
+
+readr::write_csv(ej_all %>% select(city, pctPoverty, meanRisk), "docs/ej.csv")
+```
