@@ -1,5 +1,5 @@
-# Flood inundation prediction
-*Trained on Calgary, tested for transferability in Denver and Minneapolis*
+# Flood Inundation Prediction
+***Trained on Calgary, tested for transferability in Denver and Minneapolis***
 
 **Click to watch our [presentation video](https://www.youtube.com/watch?v=l8quCz-AnGw&t=4s)🎉 and we have [an interactive storytelling web](https://cyber-hbliu.github.io/flood-inundation-prediction/)**
 
