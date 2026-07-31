@@ -1,18 +1,10 @@
 
-Deliverables:
+# Introduction
 
-1. ~3 page report (in pdf form) or knitted R Markdown document (in html form) due on Canvas,
+**Click to watch our [presentation video](https://www.youtube.com/watch?v=l8quCz-AnGw&t=4s)🎉 and we have [an interactive storytelling web](https://cyber-hbliu.github.io/flood-inundation-prediction/)**
 
-2. A youtube video, linked in your report or markdown, that annotates your project alongside visual outputs - this is designed to be a portfolio item for your use in the future.
+Floods are one of the most devastating natural disasters, causing widespread damage to communities and infrastructure. This analysis builds a predictive model of flood inundation probability in Calgary, Alberta, and then transfers it to other cities to test its performance in a different context. 
 
-The purpose of this project is to estimate a predictive model that yields predictions in space interpreted as ‘the probability that an area will be inundated with flood water”. You will train and validate your model on the city of Calgary, Alberta (Canada) and then predict for a comparable city.
+From the city of Calgary we can see that Calgary is at its greatest risk of flooding during spring and summer. Calgary's 2013 flood displaced roughly 80,000 residents and remains the reference event for the city's flood planning. The Front Range of Colorado flooded the same year under similar foothills rainfall. Additionally, heavy rainfall on the melting snowpack in the Rocky Mountains combined with steep, rocky terrain caused rapid and intense flooding in southern-Alberta watersheds. Flooding disrupted businesses, damaged critical infrastructure and also led to power outages across Calgary.
 
-This is a big step up from our first two assignments - you are going to do statistical modeling in R. Please make use of your instructor and TA office hours and the in-class workshop time to get comfortable if this is your first time doing this kind of work.
-
-To be clear, to do this analysis, you will copy the code from the land conservation markdown (predicting the probability of land conservation) and create new independent variables for a model that predicts probability of flood inundation. You can wrangle data in ArcGIS or R, it’s your choice, but your modeling will take place in R. Once you’ve trained your model on Calgary and are satisfied, you can use the ‘predict’ command to predict for your comparable city.
-
-You can work in teams of two. Sign up for a team in the teammate signup sheet below. If you have a person you’d prefer to work with, sign up as a team, otherwise just put your name on the sheet – either as Team Member 1 on a new team, or as Member 2 next to another solo student. If you can’t find a team (we might have an odd number of students), let me know and we will accommodate you in a team of three. If you would prefer to work alone, let me know.
-
-Access the teammate signup sheet hereLinks to an external site..
-
-One team member should gather available features from Calgary, the other from your comparable city. You must stick to glm only (no fancy models!). You may wrangle data in either ArcGIS or R, but you will be doing your modeling in R.
+As a river city, it is important to prepare, respond and adapt to floods. Every spring, the city of Calgary actively monitor the rivers for flooding. They continuously improve the flood forecasting to provide citizens with the earliest possible warning. Therefore, the information from this analysis can be used by city planners in Calgary to make informed decisions about land use, infrastructure development, and emergency preparedness. To deploy such an algorithm, we would first need to validate and refine the model using historical flood data and other relevant features. Once we have a model that fits well, we can use it to generate flood inundation maps for Calgary, and also the comparable cities.
