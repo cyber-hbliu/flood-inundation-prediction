@@ -6,7 +6,7 @@
 <title>Estimating flood inundation probability in space</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
   --ink:#08306B; --paper:#F7FBFF; --reed:#bcc47a; --reed-l:#E8EDBE;
@@ -14,377 +14,253 @@
   --serif:"Source Serif 4",Georgia,serif;
   --grot:"Space Grotesk",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,monospace;
-  --dur:.55s;
+  --dur:.6s;
+  --ease:cubic-bezier(.4,0,.2,1);
 }
 *{box-sizing:border-box;margin:0}
-html,body{height:100%;overflow:hidden}
-body{background:var(--paper);color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.7;-webkit-font-smoothing:antialiased}
-a{color:var(--ink)}
+html{scroll-behavior:smooth}
+body{background:var(--paper);color:var(--ink);font-family:var(--serif);font-size:17px;line-height:1.75;-webkit-font-smoothing:antialiased;overflow-x:hidden}
 button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
 a:focus-visible,button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 
-/* ---------- app grid: 70 / 30 ---------- */
-.app{display:grid;grid-template-columns:70% 30%;height:100vh;width:100vw}
+/* ---------- app grid: 60 / 40 ---------- */
+.app{display:grid;grid-template-columns:60% 40%;min-height:100vh}
 
-/* ---------- viz (left, fixed) ---------- */
-.viz{position:relative;height:100vh;overflow:hidden;background:var(--paper);border-right:1px solid var(--mist)}
-.viz canvas{position:absolute;inset:0;width:100%;height:100%;display:block;transition:opacity var(--dur) ease}
-.chart-layer{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity var(--dur) ease;display:flex;align-items:center;justify-content:center}
-.chart-layer svg{width:min(88%,860px);height:min(80%,560px);overflow:visible}
+/* ---------- viz (sticky in left column) ---------- */
+.viz-col{position:relative}
+.viz{position:sticky;top:0;height:100vh;overflow:hidden;background:var(--paper);border-right:1px solid var(--mist)}
+.viz canvas{position:absolute;inset:0;width:100%;height:100%;display:block;transition:opacity var(--dur) var(--ease)}
+.chart-layer{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity var(--dur) var(--ease);display:flex;align-items:center;justify-content:center;padding:150px 60px 100px 60px}
+.chart-layer svg{width:100%;height:100%;overflow:visible}
 .viz.mode-chart .chart-layer{opacity:1;pointer-events:auto}
-.viz.mode-chart canvas{opacity:.10;filter:saturate(.4)}
-.viz-title{position:absolute;top:26px;left:32px;font-family:var(--grot);font-weight:500;font-size:14px;letter-spacing:.02em;background:rgba(247,251,255,.82);padding:8px 14px;border-left:3px solid var(--ink);backdrop-filter:blur(4px);max-width:60%;transition:opacity .35s}
-.viz-caption{position:absolute;top:26px;right:32px;font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--mid);opacity:.9}
-.viz-legend{position:absolute;bottom:26px;left:32px;background:rgba(247,251,255,.9);padding:10px 14px;font-family:var(--mono);font-size:11px;border:1px solid var(--mist);max-width:280px;transition:opacity .35s}
+.viz.mode-chart canvas{opacity:.08;filter:saturate(.3)}
+
+.viz-header{position:absolute;top:44px;left:52px;z-index:3;max-width:78%;transition:opacity .35s var(--ease)}
+.viz-header .kicker{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--mid);margin-bottom:14px;min-height:14px}
+.viz-header .title{font-family:var(--grot);font-size:clamp(24px,2.4vw,34px);font-weight:700;color:var(--ink);line-height:1.08;letter-spacing:-.015em}
+
+.viz-legend{position:absolute;bottom:32px;left:52px;background:rgba(247,251,255,.94);padding:12px 16px;font-family:var(--mono);font-size:11px;border:1px solid var(--mist);max-width:280px;z-index:2;transition:opacity .35s}
 .viz-legend[hidden]{display:none}
-.viz-legend .lg-title{margin-bottom:4px;letter-spacing:.08em;color:var(--mid);text-transform:uppercase;font-size:10px}
-.viz-legend .lg-row{display:flex;align-items:center;gap:8px;margin:3px 0}
+.viz-legend .lg-title{margin-bottom:6px;letter-spacing:.14em;color:var(--mid);text-transform:uppercase;font-size:9.5px}
+.viz-legend .lg-row{display:flex;align-items:center;gap:9px;margin:3px 0}
 .viz-legend .sw{width:14px;height:14px;flex:0 0 14px;border:1px solid rgba(8,48,107,.08)}
-.viz-hint{position:absolute;bottom:26px;right:32px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--mid);text-transform:uppercase;opacity:.6}
-.tooltip{position:fixed;pointer-events:none;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:11px;padding:6px 9px;border-radius:2px;opacity:0;z-index:30;max-width:260px;line-height:1.55;transition:opacity .12s}
 
-/* ---------- narrative (right, scrolls internally) ---------- */
-.narrative{height:100vh;overflow-y:auto;overflow-x:hidden;padding:0 72px 0 44px;scrollbar-width:thin;scrollbar-color:var(--mist) transparent;scroll-behavior:smooth}
-.narrative::-webkit-scrollbar{width:6px}
-.narrative::-webkit-scrollbar-thumb{background:var(--mist);border-radius:3px}
-.narrative-inner{padding-top:8px}
+.tooltip{position:fixed;pointer-events:none;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:11px;padding:7px 10px;border-radius:2px;opacity:0;z-index:30;max-width:280px;line-height:1.6;transition:opacity .12s}
 
-.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:6vh 0}
-.hero .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--mid)}
-.hero h1{font-family:var(--grot);font-weight:700;font-size:clamp(28px,3.2vw,44px);line-height:1.05;letter-spacing:-.02em;margin:20px 0 22px}
-.hero .lede{font-size:16.5px;color:var(--ink);max-width:44ch}
-.hero .cities{margin-top:32px;display:flex;flex-direction:column;gap:10px;font-family:var(--mono);font-size:12px;color:var(--mid)}
-.hero .cities span{border-top:2px solid var(--reed);padding-top:6px}
-.hero-rule{height:5px;background:linear-gradient(90deg,var(--ink) 0 62%,var(--reed) 62% 82%,var(--reed-l) 82% 100%);margin-top:36px;max-width:280px}
-.scrollhint{margin-top:44px;font-family:var(--mono);font-size:10px;letter-spacing:.24em;color:var(--mid);text-transform:uppercase}
+.viz-hint{position:absolute;bottom:32px;right:52px;font-family:var(--mono);font-size:9.5px;letter-spacing:.24em;color:var(--mid);text-transform:uppercase;opacity:0;z-index:2;transition:opacity .35s}
 
-.step{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:8vh 0;opacity:.35;transform:translateY(14px);transition:opacity .55s ease,transform .55s ease}
-.step.is-active{opacity:1;transform:none}
-.step .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--mid);display:flex;justify-content:space-between;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--mist)}
-.step h2{font-family:var(--grot);font-weight:700;font-size:22px;letter-spacing:-.01em;margin:0 0 14px;line-height:1.2}
-.step p{margin:0 0 12px;font-size:15.5px;color:var(--ink);max-width:44ch}
-.step p:last-child{margin-bottom:0}
-.step .note{font-family:var(--mono);font-size:11.5px;color:var(--mid);border-top:1px dashed var(--mist);padding-top:10px;margin-top:14px;line-height:1.55}
-.step em{font-style:italic;color:var(--mid)}
-.step .metric{display:inline-block;font-family:var(--mono);color:var(--ink);border-bottom:1px dotted var(--mid);padding:0 2px}
+/* ---------- narrative (natural body scroll on right column) ---------- */
+.narrative-col{padding:0 88px 0 56px;position:relative;z-index:1}
 
-.outro{min-height:80vh;display:flex;flex-direction:column;justify-content:center;padding:10vh 0 14vh}
-.outro h2{font-family:var(--grot);font-size:24px;font-weight:700;margin-bottom:14px}
-.outro p{max-width:44ch;font-size:15.5px}
-.outro .meta{font-family:var(--mono);font-size:11.5px;color:var(--mid);margin-top:26px;line-height:1.9}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:12vh 0}
+.hero .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--mid);margin-bottom:20px}
+.hero h1{font-family:var(--grot);font-weight:700;font-size:clamp(30px,3.4vw,48px);line-height:1.05;letter-spacing:-.02em;margin-bottom:26px;color:var(--ink)}
+.hero .lede{font-size:17px;color:var(--ink);max-width:46ch;margin-bottom:32px}
+.hero .cities{display:flex;flex-direction:column;gap:10px;font-family:var(--mono);font-size:12px;color:var(--mid);margin-bottom:44px}
+.hero .cities span{border-top:2px solid var(--reed);padding-top:8px}
+.hero .scrollhint{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;color:var(--mid);text-transform:uppercase}
 
-/* ---------- rail (pipeline, right edge) ---------- */
-.rail{position:fixed;right:14px;top:50%;transform:translateY(-50%);z-index:6;display:flex;flex-direction:column;gap:6px}
-.rail-cap{font-family:var(--mono);font-size:9px;letter-spacing:.24em;color:var(--mid);text-transform:uppercase;margin-bottom:10px;writing-mode:vertical-rl;transform:rotate(180deg);align-self:center}
-.rail-line{position:absolute;left:50%;top:34px;bottom:0;width:2px;background:var(--mist);transform:translateX(-1px);z-index:-1}
-.rail-fill{position:absolute;left:50%;top:34px;width:2px;background:var(--ink);height:0%;transform:translateX(-1px);transition:height .3s linear;z-index:-1}
-.rail-step{position:relative;display:flex;align-items:center;gap:10px;padding:5px 4px;flex-direction:row-reverse}
-.rail-step .dot{width:12px;height:12px;flex:0 0 12px;border:2px solid var(--mid);background:var(--paper);transform:rotate(45deg);transition:background .3s,border-color .3s}
-.rail-step .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mid);opacity:0;transform:translateX(6px);transition:opacity .2s,transform .2s;white-space:nowrap}
-.rail-step:hover .lbl,.rail-step.is-active .lbl{opacity:1;transform:none}
-.rail-step.is-active .dot{background:var(--ink);border-color:var(--ink)}
-.rail-step.is-done .dot{background:var(--reed);border-color:var(--reed)}
+.step,.outro{min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:12vh 0}
+.step p,.outro p{margin:0 0 16px;font-size:16px;color:var(--ink);max-width:46ch;line-height:1.75;opacity:.35;transform:translateY(8px);transition:opacity .55s var(--ease),transform .55s var(--ease)}
+.step.is-active p,.outro.is-active p{opacity:1;transform:none}
+.step p:last-child,.outro p:last-child{margin-bottom:0}
+.step em,.outro em{font-style:italic;color:var(--mid)}
+.step .metric{display:inline-block;font-family:var(--mono);color:var(--ink);border-bottom:1px dotted var(--mid);padding:0 2px;font-size:.95em}
+.step .note,.outro .note{font-family:var(--mono);font-size:12px;color:var(--mid);border-top:1px dashed var(--mist);padding-top:12px;margin-top:20px;line-height:1.65;opacity:.35;transition:opacity .55s var(--ease)}
+.step.is-active .note,.outro.is-active .note{opacity:.85}
+.outro h2{font-family:var(--grot);font-size:26px;font-weight:700;margin-bottom:16px;line-height:1.2;opacity:.35;transition:opacity .55s var(--ease)}
+.outro.is-active h2{opacity:1}
+.outro .meta{font-family:var(--mono);font-size:11.5px;color:var(--mid);margin-top:32px;line-height:1.9;opacity:.35;transition:opacity .55s var(--ease)}
+.outro.is-active .meta{opacity:.85}
 
-/* ---------- responsive fallback ---------- */
+/* ---------- rail: dots only, right-aligned ---------- */
+.rail{position:fixed;right:14px;top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:18px;align-items:flex-end;padding:12px 6px}
+.rail button{position:relative;padding:6px;line-height:0}
+.rail .dot{display:block;width:9px;height:9px;border:1.5px solid var(--mid);background:var(--paper);transform:rotate(45deg);transition:all .3s var(--ease)}
+.rail button.is-active .dot{background:var(--ink);border-color:var(--ink);width:11px;height:11px}
+.rail button.is-done .dot{background:var(--reed);border-color:var(--reed)}
+.rail button:hover .dot{border-color:var(--ink)}
+.rail button:hover::after{content:attr(data-label);position:absolute;right:calc(100% + 14px);top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:10.5px;color:var(--ink);background:rgba(247,251,255,.98);padding:5px 10px;border:1px solid var(--mist);white-space:nowrap;letter-spacing:.14em;text-transform:uppercase;pointer-events:none}
+
+/* ---------- responsive ---------- */
 @media(max-width:960px){
-  html,body{overflow:auto}
-  .app{grid-template-columns:1fr;height:auto}
-  .viz{position:sticky;top:0;height:60vh;border-right:0;border-bottom:1px solid var(--mist);z-index:2}
-  .narrative{height:auto;overflow:visible;padding:0 24px}
+  .app{grid-template-columns:1fr}
+  .viz{height:55vh;border-right:0;border-bottom:1px solid var(--mist)}
+  .narrative-col{padding:0 24px}
   .rail{display:none}
+  .viz-header{top:20px;left:24px}
+  .viz-legend{bottom:20px;left:24px}
 }
 
 /* ---------- chart primitives ---------- */
-.chart-title{font-family:var(--grot);font-weight:500;font-size:13px;fill:var(--mid);letter-spacing:.02em}
-.axis text{font-family:var(--mono);font-size:10px;fill:var(--mid)}
+.axis text{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:10.5px;fill:var(--mid)}
 .axis line,.axis path{stroke:var(--mist)}
-.grid line{stroke:var(--mist);stroke-dasharray:2 3;opacity:.7}
+.grid line{stroke:var(--mist);stroke-dasharray:2 3;opacity:.65}
 .grid path{display:none}
+.chart-title{font-family:"Space Grotesk",system-ui,sans-serif;font-weight:500;font-size:13px;fill:var(--mid);letter-spacing:.02em}
 </style>
 </head>
 <body>
 
 <div class="app">
 
-  <section class="viz" id="viz" aria-label="Analysis visualization">
-    <canvas id="map" role="img" aria-label="Choropleth map that recolors as the narrative advances"></canvas>
-    <div class="chart-layer" id="chartLayer">
-      <svg id="chartSvg" viewBox="0 0 800 520" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
-    </div>
-    <div class="viz-title" id="vizTitle">Loading&hellip;</div>
-    <div class="viz-caption" id="vizCaption"></div>
-    <div class="viz-legend" id="vizLegend" hidden></div>
-    <div class="viz-hint">Scroll the right column &rarr; the view updates</div>
-    <div class="tooltip" id="tip" role="tooltip"></div>
-  </section>
+  <div class="viz-col">
+    <section class="viz" id="viz" aria-label="Analysis visualization">
+      <canvas id="map" role="img" aria-label="Choropleth map"></canvas>
+      <div class="chart-layer" id="chartLayer">
+        <svg id="chartSvg" viewBox="0 0 800 520" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <header class="viz-header" id="vizHeader">
+        <div class="kicker" id="vizKicker"></div>
+        <h2 class="title" id="vizTitle">Loading&hellip;</h2>
+      </header>
+      <div class="viz-legend" id="vizLegend" hidden></div>
+      <div class="tooltip" id="tip" role="tooltip"></div>
+      <div class="viz-hint" id="vizHint">Scroll &darr; to advance</div>
+    </section>
+  </div>
 
-  <section class="narrative" id="narrative" aria-label="Analysis narrative">
-    <div class="narrative-inner">
+  <div class="narrative-col" id="narrative">
 
-      <article class="hero" data-step="hero" data-nav="intro">
-        <span class="kicker">Spatial statistical modeling &middot; logistic regression &middot; transferability</span>
-        <h1>Estimating flood inundation probability in space</h1>
-        <p class="lede">Every 500-meter cell in Calgary receives a prediction interpreted as the
-        probability that the area will be inundated by flood water. The model is trained and
-        validated on Calgary, then transferred to two US cities chosen along a terrain gradient.
-        The transfer measures what the model has actually learned and where its validity ends.</p>
-        <div class="cities">
-          <span>Calgary, AB &mdash; training city</span>
-          <span>Denver, CO &mdash; terrain analog</span>
-          <span>Minneapolis, MN &mdash; flat contrast</span>
-        </div>
-        <div class="hero-rule" aria-hidden="true"></div>
-        <span class="scrollhint">Scroll &darr; to begin</span>
-      </article>
+    <article class="hero" data-step="hero" data-nav="intro" data-kicker="" data-title="">
+      <span class="kicker">Spatial statistical modeling &middot; logistic regression &middot; transferability</span>
+      <h1>Estimating flood inundation probability in space</h1>
+      <p class="lede">Every 500-meter cell in Calgary receives a prediction interpreted as the probability that the area will be inundated by flood water. The model is trained and validated on Calgary, then transferred to two US cities chosen along a terrain gradient. The transfer measures what the model has learned and where its validity ends.</p>
+      <div class="cities">
+        <span>Calgary, AB &mdash; training city</span>
+        <span>Denver, CO &mdash; terrain analog</span>
+        <span>Minneapolis, MN &mdash; flat contrast</span>
+      </div>
+      <span class="scrollhint">Scroll &darr; to begin</span>
+    </article>
 
-      <article class="step" data-step="label" data-nav="data">
-        <div class="eyebrow"><span>Data</span><span>Calgary</span></div>
-        <h2>The label is the 1-in-100-year flood extent</h2>
-        <p>Calgary is tiled with a 500&nbsp;m fishnet. A cell receives a positive label when more
-        than five percent of its area falls inside the City of Calgary&rsquo;s official 1&nbsp;%
-        annual-chance flood extent &mdash; a modeled steady-state hazard rather than a specific
-        storm event.</p>
-        <p>Inundated cells trace the Bow and Elbow river valleys and the Nose Creek corridor.
-        Elsewhere the label is zero, and it is zero everywhere by a wide margin: only
-        <span class="metric" id="mBase">&mdash;</span> of cells are labelled positive, which
-        shapes every downstream decision about thresholds and error costs.</p>
-        <p class="note">Source: City of Calgary Open Data, 1:100 flood inundation extent, 2019
-        revision. Any cell whose polygon intersection exceeds 5&nbsp;% of the fishnet cell area
-        is coded positive.</p>
-      </article>
+    <article class="step" data-step="label" data-nav="data" data-kicker="Data &middot; Calgary" data-title="Flood extent label">
+      <p>Calgary is tiled with a 500&nbsp;m fishnet. A cell receives a positive label when more than five percent of its area falls within the City of Calgary&rsquo;s official 1&nbsp;% annual-chance flood extent &mdash; a modeled steady-state hazard rather than a specific storm.</p>
+      <p>Positive cells trace the Bow and Elbow river valleys and the Nose Creek corridor. Elsewhere the label is zero, and it is zero by a wide margin: only <span class="metric" id="mBase">&mdash;</span> of cells are positive. That class imbalance drives every downstream decision about thresholds and error costs.</p>
+      <p class="note">Source: City of Calgary Open Data, 1:100 flood inundation extent (2019 revision). Cells with intersection &ge; 5&nbsp;% of area coded positive.</p>
+    </article>
 
-      <article class="step" data-step="dist" data-nav="features">
-        <div class="eyebrow"><span>Feature 1 of 4</span><span>Calgary</span></div>
-        <h2>Distance to river</h2>
-        <p>Euclidean distance from each cell centroid to the nearest mapped river polyline. The
-        gradient is sharp: flooded cells cluster within a few hundred meters of a channel, and
-        the density collapses beyond roughly one kilometer.</p>
-        <p>This makes distance the single strongest predictor in the specification. Darker cells
-        in the map are closer to a channel; the ridge of dark cells follows the Bow-Elbow
-        confluence in the city core.</p>
-      </article>
+    <article class="step" data-step="dist" data-nav="features" data-kicker="Feature 1 of 4 &middot; Calgary" data-title="Distance to river">
+      <p>Euclidean distance from each cell centroid to the nearest mapped river polyline. The gradient is sharp: flooded cells cluster within a few hundred meters of a channel, and the density collapses beyond roughly one kilometer.</p>
+      <p>This is the single strongest predictor in the specification. Darker cells sit closer to a channel; the ridge of dark cells traces the Bow&ndash;Elbow confluence in the city core.</p>
+    </article>
 
-      <article class="step" data-step="slope" data-nav="features">
-        <div class="eyebrow"><span>Feature 2 of 4</span><span>Calgary</span></div>
-        <h2>Slope</h2>
-        <p>Mean terrain slope in degrees, computed from a satellite-derived elevation model.
-        Contrary to intuition, slope runs slightly <em>higher</em> in flooded cells &mdash; not
-        because slope causes flooding, but because channels sit at the base of valley walls, so
-        the flood surface itself brushes against steep terrain.</p>
-        <p>Slope on its own is therefore a marker of valley topography rather than a hydrologic
-        driver. The next feature is what separates the valley floor from the valley wall.</p>
-      </article>
+    <article class="step" data-step="slope" data-nav="features" data-kicker="Feature 2 of 4 &middot; Calgary" data-title="Slope">
+      <p>Mean terrain slope in degrees from a satellite elevation model. Contrary to intuition, slope runs slightly <em>higher</em> in flooded cells &mdash; not because slope causes flooding, but because channels sit at the base of valley walls, so the flood surface brushes against steep terrain.</p>
+      <p>Slope alone marks valley topography rather than hydrologic risk. Elevation is what separates the valley floor from the valley wall.</p>
+    </article>
 
-      <article class="step" data-step="elev" data-nav="features">
-        <div class="eyebrow"><span>Feature 3 of 4</span><span>Calgary</span></div>
-        <h2>Elevation</h2>
-        <p>Mean cell elevation, meters above sea level. Water accumulates at low elevation;
-        elevation and slope <em>together</em> distinguish the valley floor, which floods, from
-        the valley wall, which does not.</p>
-        <p>Reading elevation without slope would misclassify entire plateaus. Reading slope
-        without elevation would misclassify hillsides. The two features carry complementary
-        signal that a linear model can combine cleanly.</p>
-      </article>
+    <article class="step" data-step="elev" data-nav="features" data-kicker="Feature 3 of 4 &middot; Calgary" data-title="Elevation">
+      <p>Mean cell elevation, meters above sea level. Water accumulates at low elevation; elevation and slope together distinguish the valley floor, which floods, from the valley wall, which does not.</p>
+      <p>Elevation without slope would misclassify entire plateaus. Slope without elevation would misclassify hillsides. The two features carry complementary signal that a linear model combines cleanly.</p>
+    </article>
 
-      <article class="step" data-step="imperv" data-nav="features">
-        <div class="eyebrow"><span>Feature 4 of 4</span><span>Calgary</span></div>
-        <h2>Impervious share</h2>
-        <p>Share of the cell covered by pavement and rooftops, derived from the city&rsquo;s
-        landcover composite. Impervious surfaces convert rainfall to runoff instead of
-        infiltration, which raises the flood odds wherever terrain concentrates the flow.</p>
-        <p>Alone this is a weak signal &mdash; downtown is largely impervious and does not flood.
-        Combined with proximity to a channel it becomes a meaningful risk amplifier along the
-        river corridor.</p>
-      </article>
+    <article class="step" data-step="imperv" data-nav="features" data-kicker="Feature 4 of 4 &middot; Calgary" data-title="Impervious surface">
+      <p>Share of the cell covered by pavement and rooftops, from the city landcover composite. Impervious surfaces convert rainfall into runoff instead of infiltration.</p>
+      <p>Alone this is a weak signal &mdash; downtown Calgary is largely impervious and does not flood. Combined with proximity to a channel, it becomes a meaningful risk amplifier along the river corridor.</p>
+    </article>
 
-      <article class="step" data-step="model" data-nav="model">
-        <div class="eyebrow"><span>Model</span><span>Specification</span></div>
-        <h2>Four features, one logistic regression</h2>
-        <p>The four features are z-scored within each city before fitting, so every coefficient
-        reads as the change in log-odds per standard deviation. Standardization matters twice:
-        it makes the coefficients directly comparable, and it makes different instruments
-        measuring the same quantity land on the same scale during transfer.</p>
-        <p>The signs are stable across bootstrap draws. Distance and elevation lower the odds;
-        impervious share raises them; slope is negligible on its own once elevation is present.</p>
-        <p class="note">Fit with <code>caret::train(method = "glm", family = "binomial")</code>
-        on a 70/30 training split with a fixed seed. Full specification in the methods report.</p>
-      </article>
+    <article class="step" data-step="model" data-nav="model" data-kicker="Model &middot; Calgary" data-title="Logistic regression">
+      <p>The four features are z-scored within each city before fitting, so every coefficient reads as the change in log-odds per standard deviation. Standardization serves twice: coefficients become directly comparable within the model, and different instruments measuring the same quantity land on the same scale during transfer.</p>
+      <p>Signs are stable across bootstrap draws. Distance to river (&beta;&nbsp;&asymp;&nbsp;<span class="metric">&minus;2.14</span>) and elevation (&beta;&nbsp;&asymp;&nbsp;<span class="metric">&minus;1.32</span>) lower the odds. Impervious share (&beta;&nbsp;&asymp;&nbsp;<span class="metric">+0.61</span>) raises them. Slope alone is negligible (&beta;&nbsp;&asymp;&nbsp;<span class="metric">&minus;0.28</span>) once elevation is present. The map shows the fitted probability surface &mdash; high near the corridor, near zero elsewhere.</p>
+      <p class="note">Fit with <code>caret::train(method = "glm", family = "binomial")</code> on a 70/30 training split with a fixed seed.</p>
+    </article>
 
-      <article class="step" data-step="threshold" data-nav="model">
-        <div class="eyebrow"><span>Threshold</span><span>Class imbalance</span></div>
-        <h2>Threshold selection under class imbalance</h2>
-        <p>Only nine percent of cells flood, so a conventional 0.5 cutoff would bury the
-        minority class. The decision threshold is instead tuned with Youden&rsquo;s
-        <em>J</em> statistic, which maximizes sensitivity plus specificity minus one, and
-        lands near <span class="metric" id="mThresh">0.10</span>.</p>
-        <p>The choice reflects an asymmetric cost. A missed flood cell propagates into planning
-        decisions with real consequences; a spurious flag is cheap to review. Erring toward
-        recall is the correct side to err on for this class of decision.</p>
-      </article>
+    <article class="step" data-step="threshold" data-nav="model" data-kicker="Model &middot; Calgary" data-title="Threshold selection">
+      <p>Only nine percent of cells flood. A conventional 0.5 cutoff would classify almost everything as negative and bury the minority class. The decision threshold is instead tuned with Youden&rsquo;s <em>J</em> statistic (sensitivity + specificity &minus; 1), which lands near <span class="metric" id="mThresh">0.10</span>.</p>
+      <p>The map shows the fitted probability surface binarized at that threshold: dark cells exceed it, mid cells sit within one-third of it, light cells fall below. The asymmetric cost is deliberate &mdash; a missed flood cell propagates into planning decisions with real consequences; a spurious flag is cheap to review. Erring toward recall is the correct side to err on.</p>
+    </article>
 
-      <article class="step" data-step="validate-map" data-nav="validate">
-        <div class="eyebrow"><span>Validation</span><span>Spatial holdout</span></div>
-        <h2>The honest test is spatial</h2>
-        <p>Neighboring cells share almost all of their features, so a random 70/30 split leaks
-        spatial information across the boundary and inflates every performance number. A more
-        realistic protocol trains on one half of the city and predicts the other.</p>
-        <p>Here the model is refit on the <em>western</em> half of Calgary and evaluated on the
-        <em>eastern</em> half. This estimates the performance the model would deliver on
-        genuinely unseen territory, which is the setting for any city-to-city transfer.</p>
-      </article>
+    <article class="step" data-step="validate" data-nav="validate" data-kicker="Validation &middot; Calgary" data-title="Spatial holdout">
+      <p>Neighboring 500&nbsp;m cells share almost all of their features, so a random 70/30 split leaks spatial information across the boundary and inflates every performance number. The honest protocol trains on one half of the city and evaluates the other. Here the model is refit on the <em>western</em> half of Calgary and predicted on the <em>eastern</em> half.</p>
+      <p>Discrimination survives the spatial test almost untouched &mdash; sensitivity holds near <span class="metric">0.99</span> and AUC near <span class="metric">0.95</span>. Calibration does not: specificity drops from <span class="metric">0.87</span> under the random split to <span class="metric">0.66</span> under the spatial holdout. The eastern half is systematically over-predicted.</p>
+      <p>The ranking survives; the absolute probability does not. Transfers to Denver and Minneapolis are therefore reported as <em>relative</em> risk rather than literal probability.</p>
+    </article>
 
-      <article class="step" data-step="validate-chart" data-nav="validate">
-        <div class="eyebrow"><span>Validation</span><span>Random vs. spatial</span></div>
-        <h2>Discrimination survives, calibration does not</h2>
-        <p>Ranking metrics &mdash; sensitivity and AUC &mdash; barely move when the split
-        becomes spatial. The model still discriminates flooded from non-flooded cells almost
-        as well on new terrain.</p>
-        <p>Specificity drops noticeably. Under the spatial holdout the eastern half is
-        systematically over-predicted: the model flags more cells than it should. This is a
-        calibration failure, not a ranking failure, and it is the reason results in Denver and
-        Minneapolis are presented as <em>relative</em> risk rather than literal probability.</p>
-      </article>
+    <article class="step" data-step="risk" data-nav="results" data-kicker="Results &middot; Calgary" data-title="Predicted risk">
+      <p>Predicted probabilities binned by quintile. The vast majority of cells sit close to zero, and risk concentrates along the river network. In Calgary, flood hazard is not spread across a gradient &mdash; it is confined to identifiable corridors.</p>
+      <p>Spatial-holdout sensitivity <span class="metric" id="mSens">&mdash;</span>, AUC <span class="metric" id="mAuc">&mdash;</span>, balanced accuracy <span class="metric" id="mBal">&mdash;</span>. Strong ranking in absolute terms and unusually strong for a four-feature specification.</p>
+    </article>
 
-      <article class="step" data-step="risk" data-nav="results">
-        <div class="eyebrow"><span>Results</span><span>Calgary risk surface</span></div>
-        <h2>The risk surface</h2>
-        <p>Predicted probabilities binned by quantile. The vast majority of cells sit close to
-        zero, and risk concentrates along the river network. In Calgary, flood hazard is not
-        spread across a gradient; it is confined to identifiable corridors.</p>
-        <p>Sensitivity on the spatial holdout is
-        <span class="metric" id="mSens">&mdash;</span>, AUC is
-        <span class="metric" id="mAuc">&mdash;</span>, and balanced accuracy is
-        <span class="metric" id="mBal">&mdash;</span> &mdash; strong ranking in absolute terms
-        and unusually strong for a four-feature specification.</p>
-      </article>
+    <article class="step" data-step="confusion" data-nav="results" data-kicker="Results &middot; Calgary" data-title="Confusion matrix">
+      <p>Predictions classified at the tuned threshold. False positives adjoin true positives along the same corridors &mdash; misclassification concentrates at the floodplain <em>edge</em> rather than being scattered randomly. False negatives are rare and isolated.</p>
+      <p>At a nine percent base rate, a flagged cell with moderate precision still carries a fourfold concentration of risk relative to the average cell. The map should be read as a ranking tool, not a verdict.</p>
+    </article>
 
-      <article class="step" data-step="confusion" data-nav="results">
-        <div class="eyebrow"><span>Results</span><span>Error geography</span></div>
-        <h2>Where the model errs</h2>
-        <p>The map recolors by outcome at the tuned threshold. False positives adjoin the true
-        positives along the same corridors, so misclassification concentrates at the
-        floodplain <em>edge</em> rather than being scattered randomly. False negatives are rare
-        and isolated.</p>
-        <p>At a nine percent base rate, even a flagged cell with moderate precision carries a
-        fourfold concentration of risk relative to the average cell. The map should be read as
-        a ranking tool, not a verdict.</p>
-      </article>
+    <article class="step" data-step="denver" data-nav="transfer" data-kicker="Transfer &middot; Denver, CO" data-title="Denver">
+      <p>Semi-arid, continental, at the Rocky Mountain foothills, drained by the South Platte and Cherry Creek. The flood mechanism matches Calgary&rsquo;s &mdash; heavy rain on steep terrain drains into valleys where the city sits, and the impervious core amplifies runoff.</p>
+      <p>Predicted mass sits near zero, the upper tail is bounded, and high relative risk follows the Platte corridor and the northwest lowlands. The distribution <em>shape</em> matches Calgary &mdash; the first-order transferability result.</p>
+    </article>
 
-      <article class="step" data-step="denver" data-nav="transfer">
-        <div class="eyebrow"><span>Transfer 1 of 2</span><span>Denver, CO</span></div>
-        <h2>Denver, the terrain analog</h2>
-        <p>Semi-arid, continental, at the Rocky Mountain foothills, drained by the South Platte
-        and Cherry Creek. The flood mechanism matches Calgary: heavy rain on steep terrain
-        drains into valleys where the city sits, and the impervious core amplifies the runoff.</p>
-        <p>Predicted mass sits near zero, the upper tail is bounded, and high relative risk
-        follows the Platte corridor and the northwest lowlands. The distribution <em>shape</em>
-        matches Calgary, which is the first-order transferability result.</p>
-      </article>
+    <article class="step" data-step="mpls" data-nav="transfer" data-kicker="Transfer &middot; Minneapolis, MN" data-title="Minneapolis">
+      <p>Riverine and continental like Calgary, but the terrain is flat prairie along the Mississippi. With elevation and slope variation stripped away, distance to river is the only feature with meaningful spread to work with.</p>
+      <p>Predictions saturate in a narrow band along the river trench and the Chain of Lakes. The model reduces to a river buffer &mdash; and that reduction is itself the finding: this specification encodes foothills-valley hydrology, not a universal flood signature.</p>
+    </article>
 
-      <article class="step" data-step="mpls" data-nav="transfer">
-        <div class="eyebrow"><span>Transfer 2 of 2</span><span>Minneapolis, MN</span></div>
-        <h2>Minneapolis, the flat contrast</h2>
-        <p>Riverine and continental like Calgary, but the terrain is flat prairie along the
-        Mississippi. With elevation and slope variation stripped away, distance to river is the
-        only feature with meaningful spread left to work with.</p>
-        <p>Predictions saturate in a narrow band along the river trench and around the Chain of
-        Lakes. The model degrades to a river buffer &mdash; and that reduction is itself the
-        finding: this specification encodes foothills-valley hydrology, not a universal flood
-        signature.</p>
-      </article>
+    <article class="step" data-step="dists" data-nav="transfer" data-kicker="Transfer &middot; Three cities" data-title="Distribution comparison">
+      <p>Overlaying the three predicted-probability densities compresses the transfer story into a single chart. Calgary and Denver share a shape: a spike near zero with a bounded upper tail. Minneapolis grows a saturated tail that neither of the others has.</p>
+      <p>Two cities with terrain, one distributional family. One city without terrain, distributional divergence. The boundary of validity is visible in this shape difference.</p>
+      <p class="note">Kernel density (Epanechnikov, bandwidth 0.05) on a &radic;<span style="text-decoration:overline">&thinsp;x&thinsp;</span> axis so the near-zero mass does not drown out the tail. The spike at zero is clipped for readability.</p>
+    </article>
 
-      <article class="step" data-step="dists" data-nav="transfer">
-        <div class="eyebrow"><span>Transfer</span><span>Three cities</span></div>
-        <h2>Three cities, one distribution</h2>
-        <p>Overlaying the three predicted-probability densities compresses the transfer story
-        into a single chart. Calgary and Denver share a shape: a spike near zero with a
-        bounded upper tail. Minneapolis grows a saturated tail that neither of the others has.</p>
-        <p>Two cities with terrain, one distributional family. One city without terrain,
-        distributional divergence. The boundary of validity is visible here.</p>
-        <p class="note">Kernel density on a square-root x axis so the near-zero mass does not
-        drown out the tail. The spike at zero is clipped for readability.</p>
-      </article>
+    <article class="step" data-step="equity" data-nav="equity" data-kicker="Equity &middot; Denver + Minneapolis" data-title="Poverty and risk">
+      <p>Predicted risk joined to tract-level poverty rates from the 2023 American Community Survey.</p>
+      <p>Denver: <span class="metric" id="mEjD">&mdash;</span>, <em>p</em>&nbsp;=&nbsp;0.003. Higher-poverty tracts carry higher predicted risk, consistent with the documented geography of the South Platte corridor.</p>
+      <p>Minneapolis: <span class="metric" id="mEjM">&mdash;</span>, <em>p</em>&nbsp;=&nbsp;0.56. The correlation is essentially zero. This null is a statement about <em>this model on flat terrain</em>, where predictions saturate against a river buffer &mdash; not a finding that Minneapolis has no flood-equity problem.</p>
+    </article>
 
-      <article class="step" data-step="equity" data-nav="equity">
-        <div class="eyebrow"><span>Equity</span><span>Poverty overlay</span></div>
-        <h2>Flood risk and poverty</h2>
-        <p>Predicted risk is joined to tract-level poverty rates from the 2023 American
-        Community Survey. In Denver the association is positive and statistically significant
-        (<span class="metric" id="mEjD">&mdash;</span>, <em>p</em>&nbsp;=&nbsp;0.003):
-        higher-poverty tracts carry higher predicted risk, consistent with the documented
-        geography of the South Platte corridor.</p>
-        <p>In Minneapolis the correlation is essentially zero
-        (<span class="metric" id="mEjM">&mdash;</span>, <em>p</em>&nbsp;=&nbsp;0.56). The null
-        is a statement about <em>this model on flat terrain</em>, not a finding that
-        Minneapolis has no flood-equity problem &mdash; the model there simply cannot
-        distinguish risk levels finely enough to test the relationship.</p>
-      </article>
+    <article class="outro" data-step="outro" data-nav="equity" data-kicker="Summary" data-title="Where this model applies">
+      <h2>Method, in one sentence</h2>
+      <p>The model predicts flood inundation well where terrain drives hydrology, transfers to a terrain-similar city with its risk ranking intact, and degrades to a river buffer on flat ground. That boundary defines where this class of model can support planning decisions &mdash; and where it cannot.</p>
+      <div class="meta">
+        Data &mdash; City of Calgary Open Data &middot; US Census TIGER &middot; Annual NLCD 2023 (Collection 1.1) &middot; SRTM via elevatr &middot; ACS 2023<br>
+        Built with R (sf, terra, caret) and D3 &middot; Full methods report in this repository
+      </div>
+    </article>
 
-      <article class="outro" data-step="outro" data-nav="equity">
-        <h2>Method, in one sentence</h2>
-        <p>The model predicts flood inundation well where terrain drives hydrology, transfers
-        to a terrain-similar city with its risk ranking intact, and degrades to a river buffer
-        on flat ground. That boundary defines where this class of model can support planning
-        decisions &mdash; and where it cannot.</p>
-        <div class="meta">
-          Data &mdash; City of Calgary Open Data &middot; US Census TIGER &middot;
-          Annual NLCD 2023 (Collection 1.1) &middot; SRTM via elevatr &middot; ACS 2023<br>
-          Built with R (sf, terra, caret) and D3 &middot; Full methods report in this repository
-        </div>
-      </article>
-
-    </div>
-  </section>
-
-  <nav class="rail" id="rail" aria-label="Pipeline navigation">
-    <span class="rail-cap">Pipeline</span>
-    <div class="rail-line" aria-hidden="true"></div>
-    <div class="rail-fill" id="railFill" aria-hidden="true"></div>
-    <button class="rail-step" data-goto="data"><span class="lbl">Data</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="features"><span class="lbl">Features</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="model"><span class="lbl">Model</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="validate"><span class="lbl">Validate</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="results"><span class="lbl">Results</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="transfer"><span class="lbl">Transfer</span><span class="dot"></span></button>
-    <button class="rail-step" data-goto="equity"><span class="lbl">Equity</span><span class="dot"></span></button>
-  </nav>
-
+  </div>
 </div>
+
+<nav class="rail" id="rail" aria-label="Pipeline navigation">
+  <button data-goto="data" data-label="Data"><span class="dot"></span></button>
+  <button data-goto="features" data-label="Features"><span class="dot"></span></button>
+  <button data-goto="model" data-label="Model"><span class="dot"></span></button>
+  <button data-goto="validate" data-label="Validation"><span class="dot"></span></button>
+  <button data-goto="results" data-label="Results"><span class="dot"></span></button>
+  <button data-goto="transfer" data-label="Transfer"><span class="dot"></span></button>
+  <button data-goto="equity" data-label="Equity"><span class="dot"></span></button>
+</nav>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
 <script>
 /* ============================================================
-   CONFIG — update from the final model run
+   CONFIG — replace coefficient annotations from the fit script
    ============================================================ */
 const STATS = {
   threshold: 0.099,
   random:  { sens: 0.918, spec: 0.866, auc: 0.950 },
   spatial: { sens: 0.994, spec: 0.659, auc: 0.954 },
   balAcc:  0.892,
-  ej: { denver: { r: 0.23 }, mpls: { r: 0.05 } },
-  /* placeholder standardized coefficients — replace with model$finalModel$coefficients */
-  coefficients: [
-    { name: "Distance to river",  coef: -2.14 },
-    { name: "Elevation",          coef: -1.32 },
-    { name: "Impervious share",   coef: +0.61 },
-    { name: "Slope",              coef: -0.28 }
-  ]
+  ej: { denver: { r: 0.23 }, mpls: { r: 0.05 } }
 };
-const INK="#08306B", REED="#bcc47a", REEDL="#E8EDBE", MIST="#c5cbe0",
-      MID="#3b588f", STONE="#d1d6c5", PAPER="#F7FBFF";
-const PAL5 = ["#dfe5f2","#b7c3dd","#7f95c1","#3b588f","#08306B"];
+const INK   = "#08306B", REED = "#bcc47a", REEDL = "#E8EDBE",
+      MIST  = "#c5cbe0", MID  = "#3b588f", STONE = "#d1d6c5",
+      PAPER = "#F7FBFF";
+const PAL5    = ["#dfe5f2","#b7c3dd","#7f95c1","#3b588f","#08306B"];
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const DUR = REDUCED ? 0 : 650;
+const DUR     = REDUCED ? 0 : 650;
 
 /* ============================================================
-   CANVAS MAP
+   CANVAS MAP  — latitude-aware equirectangular, aspect preserved
    ============================================================ */
-const canvas = document.getElementById("map");
-const ctx = canvas.getContext("2d");
-const vizEl = document.getElementById("viz");
-const vizTitle = document.getElementById("vizTitle");
-const vizCaption = document.getElementById("vizCaption");
+const canvas    = document.getElementById("map");
+const ctx       = canvas.getContext("2d");
+const vizEl     = document.getElementById("viz");
+const vizHeader = document.getElementById("vizHeader");
+const vizKicker = document.getElementById("vizKicker");
+const vizTitle  = document.getElementById("vizTitle");
 const vizLegend = d3.select("#vizLegend");
+const vizHint   = document.getElementById("vizHint");
 let W = 0, H = 0, DPR = 1;
 const cities = {};
 let currentCity = null, currentMode = null, dataReady = false, pendingStep = null;
@@ -399,28 +275,56 @@ function sizeCanvas(){
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 
+/* Aspect-preserving projection:
+   scale longitude by cos(mean_lat) so degrees represent equal ground
+   distance; fit both axes with a single scale factor and center. */
 function buildPaths(name){
   const c = cities[name];
-  // geoIdentity keeps rings planar so GDAL's winding cannot flip them into
-  // world-covering polygons; reflectY because latitude increases upward.
-  const pad = 48;
-  const proj = d3.geoIdentity().reflectY(true).fitExtent(
-    [[pad, pad + 40], [W - pad, H - pad - 20]], c.fc
-  );
-  const gen = d3.geoPath(proj);
+  const padX = 80, padTop = 160, padBottom = 130;
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  const eachRing = (f, fn) => {
+    const polys = f.geometry.type === "Polygon"
+      ? [f.geometry.coordinates] : f.geometry.coordinates;
+    polys.forEach(poly => poly.forEach(fn));
+  };
+  c.features.forEach(f => eachRing(f, ring => ring.forEach(([lon, lat]) => {
+    if (lon < minLon) minLon = lon;
+    if (lon > maxLon) maxLon = lon;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  })));
+  const meanLat = (minLat + maxLat) / 2;
+  const cosLat  = Math.cos(meanLat * Math.PI / 180);
+  const dx = (maxLon - minLon) * cosLat;
+  const dy =  maxLat - minLat;
+  const availW = Math.max(120, W - 2 * padX);
+  const availH = Math.max(120, H - padTop - padBottom);
+  const s = Math.min(availW / dx, availH / dy);
+  const tx = padX    + (availW - dx * s) / 2 - minLon * cosLat * s;
+  const ty = padTop  + (availH - dy * s) / 2 + maxLat * s;
+
   c.paths = []; c.bboxes = [];
   c.features.forEach(f => {
-    const p = new Path2D();
-    gen.context(p)(f);
-    c.paths.push(p);
-    c.bboxes.push(gen.bounds(f));
+    const path = new Path2D();
+    let xmn = Infinity, xmx = -Infinity, ymn = Infinity, ymx = -Infinity;
+    eachRing(f, ring => {
+      ring.forEach(([lon, lat], i) => {
+        const x = lon * cosLat * s + tx;
+        const y = -lat * s + ty;
+        if (i === 0) path.moveTo(x, y); else path.lineTo(x, y);
+        if (x < xmn) xmn = x; if (x > xmx) xmx = x;
+        if (y < ymn) ymn = y; if (y > ymx) ymx = y;
+      });
+      path.closePath();
+    });
+    c.paths.push(path);
+    c.bboxes.push([[xmn, ymn], [xmx, ymx]]);
   });
 }
 
 function renderColors(colors){
   ctx.clearRect(0, 0, W, H);
-  const c = cities[currentCity];
-  if (!c) return;
+  const c = cities[currentCity]; if (!c) return;
   ctx.lineWidth = 0.5;
   ctx.strokeStyle = "rgba(255,255,255,.85)";
   for (let i = 0; i < c.paths.length; i++){
@@ -429,7 +333,6 @@ function renderColors(colors){
     ctx.stroke(c.paths[i]);
   }
 }
-
 function snapshot(){
   const off = document.createElement("canvas");
   off.width = canvas.width; off.height = canvas.height;
@@ -437,17 +340,16 @@ function snapshot(){
   prevFrame = off;
   return off;
 }
-
 function crossfadeTo(colors){
   cancelAnimationFrame(fadeRAF);
   if (REDUCED || !prevFrame){ renderColors(colors); snapshot(); return; }
   const old = prevFrame;
   renderColors(colors);
   const fresh = snapshot();
-  const t0 = performance.now(), D = 380;
+  const t0 = performance.now(), D = 500;
   (function tick(now){
     const t = Math.min((now - t0) / D, 1);
-    const e = t < .5 ? 2*t*t : -1 + (4 - 2*t)*t;   // easeInOutQuad
+    const e = t < .5 ? 2*t*t : -1 + (4 - 2*t) * t;
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(fresh, 0, 0, W, H);
     ctx.globalAlpha = 1 - e;
@@ -470,7 +372,7 @@ window.addEventListener("resize", () => {
   }, 160);
 });
 
-/* ---------- color helpers (all O(n), cached) ---------- */
+/* color helpers */
 const cache = {};
 function gradientColors(name, prop, reverse){
   const key = `${name}:${prop}:${reverse}`;
@@ -481,21 +383,21 @@ function gradientColors(name, prop, reverse){
     return cache[key] = f.map(() => STONE);
   }
   const vals = f.map(x => +x.properties[prop]);
-  const ext = d3.extent(vals);
-  const domain = reverse ? [ext[1], ext[0]] : ext;
-  const sc = d3.scaleSequential(t => d3.interpolateRgb("#eef3fb", INK)(t)).domain(domain);
+  const ext  = d3.extent(vals);
+  const dom  = reverse ? [ext[1], ext[0]] : ext;
+  const sc   = d3.scaleSequential(t => d3.interpolateRgb("#eef3fb", INK)(t)).domain(dom);
   return cache[key] = vals.map(v => isNaN(v) ? STONE : sc(v));
 }
 function quantileColors(name, prop){
   const key = `${name}:q:${prop}`;
   if (cache[key]) return cache[key];
-  const vals = cities[name].features.map(x => +x.properties[prop]);
+  const vals   = cities[name].features.map(x => +x.properties[prop]);
   const sorted = vals.slice().sort(d3.ascending);
-  const qs = [0, .2, .4, .6, .8, 1].map(p => d3.quantile(sorted, p));
+  const qs     = [0, .2, .4, .6, .8, 1].map(p => d3.quantile(sorted, p));
   const breaks = [...new Set(qs)];
-  const n = Math.max(breaks.length - 1, 1);
-  const cols = d3.range(n).map(i => PAL5[Math.round(i * 4 / Math.max(n - 1, 1))]);
-  const sc = d3.scaleThreshold().domain(breaks.slice(1, -1)).range(cols);
+  const n      = Math.max(breaks.length - 1, 1);
+  const cols   = d3.range(n).map(i => PAL5[Math.round(i * 4 / Math.max(n - 1, 1))]);
+  const sc     = d3.scaleThreshold().domain(breaks.slice(1, -1)).range(cols);
   return cache[key] = {
     colors: vals.map(v => (v == null || isNaN(v)) ? STONE : sc(v)),
     breaks, cols
@@ -512,104 +414,92 @@ function setLegend(rows, title){
     row.append("span").text(r.t);
   });
 }
-
-function showCity(name, title, caption){
-  vizTitle.textContent = title;
-  vizCaption.textContent = caption || "";
+function showCity(name){
   if (currentCity === name) return;
   currentCity = name;
   buildPaths(name);
-  // keep prevFrame — allow crossfade across cities
+  // keep prevFrame — crossfade across cities looks like a layered swap
 }
 
 /* ============================================================
-   MODES
+   MODES  (each step -> one visual state)
    ============================================================ */
 const MODES = {
   hero(){
     setChartMode(null);
-    if (!currentCity) showCity("calgary", "Calgary, Alberta", "Study area");
-    crossfadeTo(cities.calgary.features.map(f =>
-      +f.properties.Inundation === 1 ? "#a8b8db" : "#e5ecf7"));
+    if (!currentCity) showCity("calgary");
+    crossfadeTo(cities.calgary.features.map(() => "#e5ecf7"));
     setLegend(null);
   },
   label(){
     setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "1:100 flood extent");
+    showCity("calgary");
     crossfadeTo(cities.calgary.features.map(f =>
-      +f.properties.Inundation === 1 ? INK : "#dfe6f2"));
+      +f.properties.Inundation === 1 ? INK : "#e5ecf7"));
     setLegend([
-      {c:"#dfe6f2", t:"not inundated"},
+      {c:"#e5ecf7", t:"not inundated"},
       {c:INK,       t:"inundated (1:100)"}
     ], "label");
   },
   dist(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Distance to river");
+    setChartMode(null); showCity("calgary");
     crossfadeTo(gradientColors("calgary","Mean_Distance_to_River", true));
-    setLegend([{c:"#eef3fb", t:"far"},{c:INK, t:"near"}], "distance to river");
+    setLegend([{c:"#eef3fb", t:"far from river"},{c:INK, t:"near river"}], "distance to river");
   },
   slope(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Terrain slope");
+    setChartMode(null); showCity("calgary");
     crossfadeTo(gradientColors("calgary","average_slope_degree", false));
     setLegend([{c:"#eef3fb", t:"gentle"},{c:INK, t:"steep"}], "slope, degrees");
   },
   elev(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Elevation");
+    setChartMode(null); showCity("calgary");
     crossfadeTo(gradientColors("calgary","mean_elevation", false));
     setLegend([{c:"#eef3fb", t:"low"},{c:INK, t:"high"}], "elevation, m");
   },
   imperv(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Impervious surface");
+    setChartMode(null); showCity("calgary");
     crossfadeTo(gradientColors("calgary","landcover_scale", false));
     setLegend([{c:"#eef3fb", t:"0"},{c:INK, t:"1"}], "impervious share");
   },
   model(){
-    setChartMode("coef");
-    vizTitle.textContent = "Standardized coefficients";
-    vizCaption.textContent = "log-odds per SD";
-    setLegend(null);
-    drawCoefficients();
+    setChartMode(null); showCity("calgary");
+    crossfadeTo(gradientColors("calgary","allPredictions", false));
+    setLegend([{c:"#eef3fb", t:"p ≈ 0"},{c:INK, t:"p high"}], "fitted probability");
   },
   threshold(){
-    setChartMode("hist");
-    vizTitle.textContent = "Predicted probability by observed class";
-    vizCaption.textContent = "Calgary, all cells";
-    setLegend(null);
-    drawHistogram();
+    setChartMode(null); showCity("calgary");
+    const th = STATS.threshold * 100;
+    crossfadeTo(cities.calgary.features.map(f => {
+      const p = +f.properties.allPredictions;
+      if (p >= th) return INK;
+      if (p >= th * 0.6) return "#7f95c1";
+      return "#e5ecf7";
+    }));
+    setLegend([
+      {c:INK,       t:`above threshold (p ≥ ${STATS.threshold.toFixed(2)})`},
+      {c:"#7f95c1", t:"borderline"},
+      {c:"#e5ecf7", t:"below threshold"}
+    ], "threshold (Youden’s J)");
   },
-  "validate-map"(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Spatial holdout: west trains, east tests");
+  validate(){
+    setChartMode(null); showCity("calgary");
     const c = cities.calgary, med = c.medLon;
     crossfadeTo(c.lons.map(l => l < med ? REEDL : MIST));
     setLegend([
-      {c:REEDL, t:"train, west"},
-      {c:MIST,  t:"test, east"}
+      {c:REEDL, t:"train — western half"},
+      {c:MIST,  t:"test — eastern half"}
     ], "spatial holdout");
   },
-  "validate-chart"(){
-    setChartMode("val");
-    vizTitle.textContent = "Random split vs. spatial holdout";
-    vizCaption.textContent = "higher is better";
-    setLegend(null);
-    drawValidation();
-  },
   risk(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Predicted probability (quantile bins)");
+    setChartMode(null); showCity("calgary");
     const q = quantileColors("calgary","allPredictions");
     crossfadeTo(q.colors);
     setLegend(q.cols.map((c, i) => ({
       c, t: `${Math.round(q.breaks[i])}–${Math.round(q.breaks[i+1])}%`
-    })), "relative risk, quantiles");
+    })), "predicted probability (quintiles)");
   },
   confusion(){
-    setChartMode(null);
-    showCity("calgary", "Calgary, Alberta", "Outcomes at tuned threshold");
+    setChartMode(null); showCity("calgary");
     const th = STATS.threshold * 100;
     const col = { TN: "#e5ecf7", TP: INK, FP: "#f2c46b", FN: "#c93a3a" };
     crossfadeTo(cities.calgary.features.map(f => {
@@ -621,75 +511,67 @@ const MODES = {
       {c:"#e5ecf7", t:"true negative"},
       {c:"#f2c46b", t:"false positive"},
       {c:"#c93a3a", t:"false negative"}
-    ], "confusion @ threshold");
+    ], "outcomes at tuned threshold");
   },
   denver(){
-    setChartMode(null);
-    cityRisk("denver", "Denver, Colorado", "Predicted risk (quantile bins)");
+    setChartMode(null); showCity("denver");
+    const q = quantileColors("denver","predicted");
+    crossfadeTo(q.colors);
+    setLegend(q.cols.map((c, i) => ({
+      c, t: `${(q.breaks[i]*100).toFixed(0)}–${(q.breaks[i+1]*100).toFixed(0)}%`
+    })), "relative risk (quintiles)");
   },
   mpls(){
-    setChartMode(null);
-    cityRisk("minneapolis", "Minneapolis, Minnesota", "Predicted risk (quantile bins)");
+    setChartMode(null); showCity("minneapolis");
+    const q = quantileColors("minneapolis","predicted");
+    crossfadeTo(q.colors);
+    setLegend(q.cols.map((c, i) => ({
+      c, t: `${(q.breaks[i]*100).toFixed(0)}–${(q.breaks[i+1]*100).toFixed(0)}%`
+    })), "relative risk (quintiles)");
   },
   dists(){
-    setChartMode("dens");
-    vizTitle.textContent = "Predicted probability density";
-    vizCaption.textContent = "three cities compared";
-    setLegend(null);
-    drawDensity();
+    setChartMode("dens"); setLegend(null); drawDensity();
   },
   equity(){
-    setChartMode("ej");
-    vizTitle.textContent = "Tract poverty rate vs. mean flood risk";
-    vizCaption.textContent = "ACS 2023 tracts";
-    setLegend(null);
-    drawEJ();
+    setChartMode("ej");  setLegend(null); drawEJ();
   },
   outro(){ MODES.equity(); }
 };
-function cityRisk(name, title, cap){
-  showCity(name, title, cap);
-  const q = quantileColors(name, "predicted");
-  crossfadeTo(q.colors);
-  setLegend(q.cols.map((c, i) => ({
-    c, t: `${(q.breaks[i]*100).toFixed(0)}–${(q.breaks[i+1]*100).toFixed(0)}%`
-  })), "relative risk, quantiles");
-}
 
 function setChartMode(kind){
   vizEl.classList.toggle("mode-chart", !!kind);
-  if (!kind){
-    // fade out chart contents but do NOT wipe — the transition to next chart
-    // benefits from having the old marks in place for D3 to interpolate from
-  }
+  if (!kind && currentChart) clearChart();
 }
 
 /* ============================================================
-   TOOLTIP (shared)
+   TOOLTIP
    ============================================================ */
 const tip = document.getElementById("tip");
 function showTip(e, html){
   tip.innerHTML = html;
   tip.style.opacity = 1;
   const x = e.clientX + 14, y = e.clientY - 10;
-  tip.style.left = Math.min(x, window.innerWidth - 260) + "px";
+  tip.style.left = Math.min(x, window.innerWidth - 300) + "px";
   tip.style.top  = Math.max(10, y) + "px";
 }
 function hideTip(){ tip.style.opacity = 0; }
 
 const TIP = {
   label: p => +p.Inundation === 1 ? "inundated · 1:100 extent" : "not inundated",
-  dist: p => p.Mean_Distance_to_River == null ? null :
+  dist:  p => p.Mean_Distance_to_River == null ? null :
     `distance to river ${Math.round(+p.Mean_Distance_to_River).toLocaleString()} m`,
   slope: p => p.average_slope_degree == null ? null :
     `slope ${(+p.average_slope_degree).toFixed(1)}°`,
-  elev: p => p.mean_elevation == null ? null :
+  elev:  p => p.mean_elevation == null ? null :
     `elevation ${Math.round(+p.mean_elevation)} m`,
-  imperv: p => p.landcover_scale == null ? null :
+  imperv:p => p.landcover_scale == null ? null :
     `impervious share ${(+p.landcover_scale).toFixed(2)}`,
+  model: p => `fitted p = ${(+p.allPredictions).toFixed(0)}%`,
+  threshold: p => `p = ${(+p.allPredictions).toFixed(0)}% · ${
+    +p.allPredictions >= STATS.threshold * 100 ? "above" : "below"} threshold`,
   risk: p => `p = ${(+p.allPredictions).toFixed(0)}%`,
-  "validate-map": (p, i) =>
-    cities.calgary.lons[i] < cities.calgary.medLon ? "train, west" : "test, east",
+  validate: (p, i) => cities.calgary.lons[i] < cities.calgary.medLon
+    ? "train (western half)" : "test (eastern half)",
   confusion: p => {
     const th = STATS.threshold * 100, o = +p.Inundation, pr = +p.allPredictions;
     const k = pr >= th ? (o === 1 ? "true positive" : "false positive")
@@ -722,7 +604,7 @@ canvas.addEventListener("mousemove", e => {
 canvas.addEventListener("mouseleave", hideTip);
 
 /* ============================================================
-   D3 CHARTS  (single SVG, mode swaps in/out with transitions)
+   D3 CHARTS  (density + scatter only)
    ============================================================ */
 const svg = d3.select("#chartSvg");
 const CH = { w: 800, h: 520, m: { t: 40, r: 40, b: 60, l: 70 } };
@@ -730,190 +612,25 @@ const innerW = CH.w - CH.m.l - CH.m.r;
 const innerH = CH.h - CH.m.t - CH.m.b;
 const root = svg.append("g").attr("transform", `translate(${CH.m.l},${CH.m.t})`);
 const layers = {
-  grid:  root.append("g").attr("class","grid"),
-  axis:  root.append("g").attr("class","axis"),
-  marks: root.append("g").attr("class","marks"),
-  over:  root.append("g").attr("class","over"),
-  label: root.append("g").attr("class","label")
+  grid:   root.append("g").attr("class","grid"),
+  axis:   root.append("g").attr("class","axis"),
+  marks:  root.append("g").attr("class","marks"),
+  over:   root.append("g").attr("class","over"),
+  label:  root.append("g").attr("class","label"),
+  legend: root.append("g").attr("class","legend-in")
 };
+let currentChart = null;
 
-function clearLayers(keep){
-  ["grid","axis","marks","over","label"].forEach(k => {
-    if (keep && keep.includes(k)) return;
+function clearChart(){
+  ["grid","axis","marks","over","label","legend"].forEach(k => {
     layers[k].selectAll("*")
-      .transition().duration(REDUCED ? 0 : 300)
+      .transition().duration(REDUCED ? 0 : 260)
       .style("opacity", 0).remove();
   });
+  currentChart = null;
 }
 
-/* ---------- coefficients ---------- */
-function drawCoefficients(){
-  clearLayers();
-  const data = STATS.coefficients.slice().sort((a,b) => Math.abs(b.coef) - Math.abs(a.coef));
-  const mx = d3.max(data, d => Math.abs(d.coef)) * 1.15;
-  const x = d3.scaleLinear([-mx, mx], [0, innerW]);
-  const y = d3.scaleBand(data.map(d => d.name), [0, innerH]).padding(.28);
-
-  layers.grid.selectAll("line").data(x.ticks(6)).join("line")
-    .attr("x1", d => x(d)).attr("x2", d => x(d))
-    .attr("y1", 0).attr("y2", innerH)
-    .style("opacity", 0)
-    .transition().duration(DUR).style("opacity", 1);
-
-  layers.axis.append("g")
-    .attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x).ticks(6).tickSizeOuter(0));
-  layers.axis.append("g")
-    .call(d3.axisLeft(y).tickSizeOuter(0));
-  layers.axis.append("line")
-    .attr("x1", x(0)).attr("x2", x(0)).attr("y1", 0).attr("y2", innerH)
-    .attr("stroke", MID).attr("stroke-dasharray","3 3");
-
-  const bars = layers.marks.selectAll("rect").data(data, d => d.name);
-  bars.join(
-    enter => enter.append("rect")
-      .attr("y", d => y(d.name)).attr("height", y.bandwidth())
-      .attr("x", x(0)).attr("width", 0)
-      .attr("fill", d => d.coef < 0 ? INK : REED)
-      .style("cursor","crosshair")
-      .on("mousemove", (e, d) => showTip(e,
-        `${d.name}<br>&beta; = ${d.coef.toFixed(2)} log-odds/SD<br>OR = ${Math.exp(d.coef).toFixed(2)}`))
-      .on("mouseleave", hideTip)
-      .call(en => en.transition().duration(DUR).ease(d3.easeCubicOut)
-        .attr("x", d => Math.min(x(0), x(d.coef)))
-        .attr("width", d => Math.abs(x(d.coef) - x(0))))
-  );
-
-  layers.label.selectAll("text").data(data, d => d.name).join(
-    enter => enter.append("text")
-      .attr("x", d => x(d.coef) + (d.coef < 0 ? -6 : 6))
-      .attr("y", d => y(d.name) + y.bandwidth()/2 + 4)
-      .attr("text-anchor", d => d.coef < 0 ? "end" : "start")
-      .attr("font-family","IBM Plex Mono").attr("font-size", 11)
-      .attr("fill", MID)
-      .style("opacity", 0)
-      .text(d => d.coef.toFixed(2))
-      .call(en => en.transition().delay(DUR*.7).duration(DUR*.5).style("opacity", 1))
-  );
-
-  layers.over.append("text")
-    .attr("x", 0).attr("y", innerH + 44)
-    .attr("class","chart-title")
-    .text("Negative shifts (left) reduce flood odds. Positive shifts (right) raise them.");
-}
-
-/* ---------- histogram ---------- */
-function drawHistogram(){
-  clearLayers();
-  const rows = cities.calgary.features.map(f => ({
-    p: +f.properties.allPredictions / 100,
-    o: +f.properties.Inundation
-  }));
-  const bins0 = d3.bin().domain([0,1]).thresholds(24).value(d => d.p)(rows.filter(r => r.o === 0));
-  const bins1 = d3.bin().domain([0,1]).thresholds(24).value(d => d.p)(rows.filter(r => r.o === 1));
-  const x = d3.scaleLinear([0,1], [0, innerW]);
-  const y = d3.scaleSqrt([0, d3.max(bins0, b => b.length)], [innerH, 0]);
-
-  layers.grid.selectAll("line").data(y.ticks(5)).join("line")
-    .attr("x1", 0).attr("x2", innerW)
-    .attr("y1", d => y(d)).attr("y2", d => y(d));
-
-  layers.axis.append("g")
-    .attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${Math.round(d*100)}%`));
-  layers.axis.append("g").call(d3.axisLeft(y).ticks(5));
-
-  const bw = (b) => Math.max(1, (x(b.x1) - x(b.x0)) / 2 - 1);
-  const bar = (bins, fill, shift, cls) =>
-    layers.marks.selectAll(`rect.b-${cls}`).data(bins).join(
-      enter => enter.append("rect").attr("class", `b-${cls}`)
-        .attr("x", b => x(b.x0) + 1 + shift).attr("width", bw)
-        .attr("y", innerH).attr("height", 0)
-        .attr("fill", fill).style("cursor","crosshair")
-        .on("mousemove", (e, b) => showTip(e,
-          `${cls}<br>p ${(b.x0*100).toFixed(0)}–${(b.x1*100).toFixed(0)}% · ${b.length} cells`))
-        .on("mouseleave", hideTip)
-        .call(en => en.transition().duration(DUR).ease(d3.easeCubicOut)
-          .attr("y", b => y(b.length))
-          .attr("height", b => y(0) - y(b.length)))
-    );
-  bar(bins0, REEDL, 0, "no inundation");
-  bar(bins1, INK, bw(bins0[0] || {x0:0,x1:.04}), "inundation");
-
-  const thx = x(STATS.threshold);
-  layers.over.append("line")
-    .attr("x1", thx).attr("x2", thx).attr("y1", 0).attr("y2", innerH)
-    .attr("stroke", MID).attr("stroke-dasharray","5 4").attr("stroke-width", 1.4)
-    .style("opacity", 0)
-    .transition().delay(DUR*.5).duration(DUR).style("opacity", 1);
-  layers.over.append("text")
-    .attr("x", thx + 8).attr("y", 18)
-    .attr("class","chart-title").style("fill", MID)
-    .text(`threshold p = ${STATS.threshold.toFixed(3)} (Youden's J)`)
-    .style("opacity", 0)
-    .transition().delay(DUR*.6).duration(DUR).style("opacity", 1);
-
-  legendInline([
-    { c: REEDL, t: "no inundation" },
-    { c: INK,   t: "inundation" }
-  ]);
-}
-
-/* ---------- validation bars ---------- */
-function drawValidation(){
-  clearLayers();
-  const data = [
-    { g: "Sensitivity", a: STATS.random.sens, b: STATS.spatial.sens },
-    { g: "Specificity", a: STATS.random.spec, b: STATS.spatial.spec },
-    { g: "AUC",         a: STATS.random.auc,  b: STATS.spatial.auc }
-  ];
-  const x0 = d3.scaleBand(data.map(d => d.g), [0, innerW]).paddingInner(.4).paddingOuter(.15);
-  const x1 = d3.scaleBand(["a","b"], [0, x0.bandwidth()]).padding(.12);
-  const y = d3.scaleLinear([0, 1], [innerH, 0]);
-
-  layers.grid.selectAll("line").data(y.ticks(5)).join("line")
-    .attr("x1", 0).attr("x2", innerW).attr("y1", d => y(d)).attr("y2", d => y(d));
-  layers.axis.append("g").attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x0).tickSizeOuter(0));
-  layers.axis.append("g").call(d3.axisLeft(y).ticks(5).tickFormat(d => d.toFixed(1)));
-
-  const grp = layers.marks.selectAll("g.grp").data(data, d => d.g).join(
-    enter => enter.append("g").attr("class","grp")
-      .attr("transform", d => `translate(${x0(d.g)},0)`)
-  );
-  const rows = data.flatMap(d => [
-    { g:d.g, k:"a", v:d.a, label:"random 70/30" },
-    { g:d.g, k:"b", v:d.b, label:"spatial west→east" }
-  ]);
-  layers.marks.selectAll("rect.bar").data(rows, d => d.g + d.k).join(
-    enter => enter.append("rect").attr("class","bar")
-      .attr("x", d => x0(d.g) + x1(d.k)).attr("width", x1.bandwidth())
-      .attr("y", innerH).attr("height", 0)
-      .attr("fill", d => d.k === "a" ? REEDL : INK)
-      .style("cursor","crosshair")
-      .on("mousemove", (e, d) => showTip(e,
-        `${d.label}<br>${d.g} = ${d.v.toFixed(3)}`))
-      .on("mouseleave", hideTip)
-      .call(en => en.transition().duration(DUR).ease(d3.easeCubicOut)
-        .attr("y", d => y(d.v)).attr("height", d => y(0) - y(d.v)))
-  );
-  layers.label.selectAll("text").data(rows, d => d.g + d.k).join(
-    enter => enter.append("text")
-      .attr("x", d => x0(d.g) + x1(d.k) + x1.bandwidth() / 2)
-      .attr("y", d => y(d.v) - 6)
-      .attr("text-anchor","middle").attr("font-family","IBM Plex Mono")
-      .attr("font-size", 11).attr("fill", MID).style("opacity", 0)
-      .text(d => d.v.toFixed(2))
-      .call(en => en.transition().delay(DUR*.6).duration(DUR*.5).style("opacity", 1))
-  );
-
-  legendInline([
-    { c: REEDL, t: "random 70/30 split" },
-    { c: INK,   t: "spatial: west trains, east tests" }
-  ]);
-}
-
-/* ---------- density (three cities) ---------- */
+/* ---------- density (three-city KDE) ---------- */
 let densCache = null;
 function computeDensity(){
   if (densCache) return densCache;
@@ -925,46 +642,50 @@ function computeDensity(){
     { name: "Minneapolis", col: REED,
       v: cities.minneapolis.features.map(f => +f.properties.predicted) }
   ];
-  const xs = d3.range(0.005, 1.001, 0.01);
-  const k = 0.05;
+  const xs   = d3.range(0.005, 1.001, 0.01);
+  const k    = 0.05;
   const epan = v => Math.abs(v /= k) <= 1 ? .75 * (1 - v*v) / k : 0;
-  const kde = V => xs.map(x => [x, d3.mean(V, v => epan(x - v))]);
+  const kde  = V => xs.map(x => [x, d3.mean(V, v => epan(x - v))]);
   return densCache = series.map(sr => ({ ...sr, d: kde(sr.v) }));
 }
+
 function drawDensity(){
-  clearLayers();
+  if (currentChart !== "dens") clearChart();
+  currentChart = "dens";
   const dens = computeDensity();
-  const x = d3.scaleSqrt([0, 1], [0, innerW]);
+  const x    = d3.scaleSqrt([0, 1], [0, innerW]);
   const ymax = Math.min(10, d3.max(dens, sr => d3.max(sr.d, p => p[1])));
-  const y = d3.scaleLinear([0, ymax], [innerH, 0]);
+  const y    = d3.scaleLinear([0, ymax], [innerH, 0]);
 
+  layers.grid.selectAll("*").remove();
   layers.grid.selectAll("line").data(y.ticks(5)).join("line")
-    .attr("x1", 0).attr("x2", innerW).attr("y1", d => y(d)).attr("y2", d => y(d));
+    .attr("x1", 0).attr("x2", innerW)
+    .attr("y1", d => y(d)).attr("y2", d => y(d))
+    .style("opacity", 0)
+    .transition().duration(DUR).style("opacity", 1);
+
+  layers.axis.selectAll("*").remove();
   layers.axis.append("g").attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${(d*100).toFixed(0)}%`));
-  layers.axis.append("g").call(d3.axisLeft(y).ticks(5));
+    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${(d*100).toFixed(0)}%`).tickSizeOuter(0));
+  layers.axis.append("g").call(d3.axisLeft(y).ticks(5).tickSizeOuter(0));
 
-  const line = d3.line()
-    .x(p => x(p[0])).y(p => y(Math.min(p[1], ymax)))
-    .curve(d3.curveBasis);
-  const area = d3.area()
-    .x(p => x(p[0])).y0(y(0)).y1(p => y(Math.min(p[1], ymax)))
-    .curve(d3.curveBasis);
+  const line = d3.line().x(p => x(p[0])).y(p => y(Math.min(p[1], ymax))).curve(d3.curveBasis);
+  const area = d3.area().x(p => x(p[0])).y0(y(0)).y1(p => y(Math.min(p[1], ymax))).curve(d3.curveBasis);
 
+  layers.marks.selectAll("*").remove();
   dens.forEach((sr, i) => {
     const a = layers.marks.append("path")
-      .attr("d", area(sr.d))
-      .attr("fill", sr.col).attr("opacity", 0);
-    a.transition().delay(i * 120).duration(DUR).attr("opacity", .10);
+      .attr("d", area(sr.d)).attr("fill", sr.col).attr("opacity", 0);
+    a.transition().delay(i * 140 + 100).duration(DUR).attr("opacity", .12);
     const p = layers.marks.append("path")
-      .attr("d", line(sr.d))
-      .attr("fill","none").attr("stroke", sr.col).attr("stroke-width", 2);
+      .attr("d", line(sr.d)).attr("fill","none").attr("stroke", sr.col).attr("stroke-width", 2.4);
     const L = p.node().getTotalLength();
     p.attr("stroke-dasharray", `${L} ${L}`).attr("stroke-dashoffset", L)
-      .transition().delay(i * 120).duration(DUR * 1.2).ease(d3.easeCubicOut)
+      .transition().delay(i * 140 + 100).duration(DUR * 1.3).ease(d3.easeCubicOut)
       .attr("stroke-dashoffset", 0);
   });
 
+  layers.over.selectAll("*").remove();
   const guide = layers.over.append("line")
     .attr("y1", 0).attr("y2", innerH)
     .attr("stroke", MID).attr("stroke-dasharray","3 3").attr("opacity", 0);
@@ -979,19 +700,21 @@ function drawDensity(){
       const idx = Math.max(0, Math.min(dens[0].d.length - 1, Math.round(xv * 100)));
       guide.attr("x1", x(xv)).attr("x2", x(xv)).attr("opacity", 1);
       showTip(e, `p = ${(xv*100).toFixed(0)}%<br>` + dens.map(sr =>
-        `<span style="color:${sr.col === INK ? "#a8b8db" : sr.col}">${sr.name}</span>: ${sr.d[idx][1].toFixed(2)}`
+        `<span style="color:${sr.col === INK ? "#a8b8db" : sr.col}">${sr.name}</span> ${sr.d[idx][1].toFixed(2)}`
       ).join("<br>"));
     })
     .on("mouseleave", () => { guide.attr("opacity", 0); hideTip(); });
 
-  legendInline(dens.map(sr => ({ c: sr.col, t: sr.name })));
+  drawInSvgLegend(dens.map(sr => ({ c: sr.col, t: sr.name })));
 }
 
 /* ---------- EJ scatter ---------- */
 function drawEJ(){
-  clearLayers();
+  if (currentChart !== "ej") clearChart();
+  currentChart = "ej";
   const rows = window.__ejRows;
   if (!rows){
+    layers.over.selectAll("*").remove();
     layers.over.append("text").attr("x", innerW/2).attr("y", innerH/2)
       .attr("text-anchor","middle").attr("class","chart-title")
       .text("ej.csv did not load.");
@@ -1002,27 +725,29 @@ function drawEJ(){
   const x = d3.scaleLinear([0, d3.max(data, d => d.x)], [0, innerW]).nice();
   const y = d3.scaleLinear([0, d3.max(data, d => d.y)], [innerH, 0]).nice();
 
+  layers.grid.selectAll("*").remove();
   layers.grid.selectAll("line.gy").data(y.ticks(6)).join("line").attr("class","gy")
     .attr("x1", 0).attr("x2", innerW).attr("y1", d => y(d)).attr("y2", d => y(d));
   layers.grid.selectAll("line.gx").data(x.ticks(6)).join("line").attr("class","gx")
     .attr("x1", d => x(d)).attr("x2", d => x(d)).attr("y1", 0).attr("y2", innerH);
 
+  layers.axis.selectAll("*").remove();
   layers.axis.append("g").attr("transform", `translate(0,${innerH})`)
-    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${(d*100).toFixed(0)}%`));
-  layers.axis.append("g").call(d3.axisLeft(y).ticks(6).tickFormat(d => `${(d*100).toFixed(1)}%`));
+    .call(d3.axisBottom(x).ticks(6).tickFormat(d => `${(d*100).toFixed(0)}%`).tickSizeOuter(0));
+  layers.axis.append("g")
+    .call(d3.axisLeft(y).ticks(6).tickFormat(d => `${(d*100).toFixed(1)}%`).tickSizeOuter(0));
 
   const col = c => c.startsWith("Denver") ? INK : REED;
 
+  layers.marks.selectAll("*").remove();
   layers.marks.selectAll("circle").data(data).join(
     enter => enter.append("circle")
-      .attr("cx", d => x(d.x)).attr("cy", innerH)
-      .attr("r", 0)
+      .attr("cx", d => x(d.x)).attr("cy", innerH).attr("r", 0)
       .attr("fill", d => col(d.city)).attr("opacity", .55)
       .style("cursor","crosshair")
       .on("mousemove", (e, d) => {
         d3.select(e.currentTarget).attr("r", 6).attr("opacity", 1);
-        showTip(e,
-          `${d.city}<br>poverty ${(d.x*100).toFixed(0)}% · risk ${(d.y*100).toFixed(1)}%`);
+        showTip(e, `${d.city}<br>poverty ${(d.x*100).toFixed(0)}% · risk ${(d.y*100).toFixed(1)}%`);
       })
       .on("mouseleave", (e) => {
         d3.select(e.currentTarget).attr("r", 3.4).attr("opacity", .55);
@@ -1032,15 +757,16 @@ function drawEJ(){
         .attr("cy", d => y(d.y)).attr("r", 3.4))
   );
 
+  layers.over.selectAll("*").remove();
   ["Denver","Minneapolis"].forEach(cn => {
     const sub = data.filter(d => d.city.startsWith(cn));
     if (sub.length < 3) return;
     const mx = d3.mean(sub, d => d.x), my = d3.mean(sub, d => d.y);
-    const b = d3.sum(sub, d => (d.x - mx) * (d.y - my)) /
-              d3.sum(sub, d => (d.x - mx) ** 2);
-    const a = my - b * mx;
+    const b  = d3.sum(sub, d => (d.x - mx) * (d.y - my)) /
+               d3.sum(sub, d => (d.x - mx) ** 2);
+    const a  = my - b * mx;
     const xd = d3.extent(sub, d => d.x);
-    const p = layers.over.append("line")
+    const p  = layers.over.append("line")
       .attr("x1", x(xd[0])).attr("y1", y(a + b * xd[0]))
       .attr("x2", x(xd[0])).attr("y2", y(a + b * xd[0]))
       .attr("stroke", cn === "Denver" ? INK : REED)
@@ -1049,58 +775,65 @@ function drawEJ(){
       .attr("x2", x(xd[1])).attr("y2", y(a + b * xd[1]));
   });
 
+  layers.label.selectAll("*").remove();
   layers.label.append("text")
     .attr("x", innerW/2).attr("y", innerH + 44)
     .attr("text-anchor","middle").attr("class","chart-title")
-    .text("tract poverty rate →");
+    .text("horizontal: tract poverty rate · vertical: mean predicted risk");
 
-  legendInline([{ c: INK, t: "Denver" }, { c: REED, t: "Minneapolis" }]);
+  drawInSvgLegend([{c:INK, t:"Denver"}, {c:REED, t:"Minneapolis"}]);
 }
 
-/* ---------- inline legend inside SVG ---------- */
-function legendInline(items){
-  const g = layers.label.append("g")
-    .attr("transform", `translate(${innerW - 6},0)`)
+function drawInSvgLegend(items){
+  layers.legend.selectAll("*").remove();
+  const lg = layers.legend.attr("transform", `translate(${innerW - 8},4)`)
     .attr("text-anchor","end").attr("font-family","IBM Plex Mono").attr("font-size", 11);
   items.forEach((it, i) => {
-    const row = g.append("g").attr("transform", `translate(0,${i * 18})`)
-      .style("opacity", 0);
-    row.append("rect").attr("x", 4).attr("y", -9).attr("width", 10).attr("height", 10)
-      .attr("fill", it.c);
+    const row = lg.append("g").attr("transform", `translate(0,${i * 18})`).style("opacity", 0);
+    row.append("rect").attr("x", 4).attr("y", -9).attr("width", 10).attr("height", 10).attr("fill", it.c);
     row.append("text").attr("x", -4).attr("y", 0).attr("fill", MID).text(it.t);
-    row.transition().delay(i * 100 + DUR * .3).duration(DUR * .6).style("opacity", 1);
+    row.transition().delay(i * 100 + DUR * .4).duration(DUR * .6).style("opacity", 1);
   });
 }
 
 /* ============================================================
-   STEP DRIVING  (IntersectionObserver on the narrative panel)
+   STEP DRIVING  (IntersectionObserver on natural body scroll)
    ============================================================ */
 const narrative = document.getElementById("narrative");
-const steps = Array.from(narrative.querySelectorAll("[data-step]"));
+const steps     = Array.from(narrative.querySelectorAll("[data-step]"));
 const NAV_ORDER = ["intro","data","features","model","validate","results","transfer","equity"];
-const railSteps = Array.from(document.querySelectorAll(".rail-step"));
+const railSteps = Array.from(document.querySelectorAll(".rail button"));
+
+function setHeader(kicker, title){
+  if (vizKicker.textContent === kicker && vizTitle.textContent === title) return;
+  vizHeader.style.opacity = 0;
+  setTimeout(() => {
+    vizKicker.textContent = kicker;
+    vizTitle.textContent  = title;
+    vizHeader.style.opacity = (kicker || title) ? 1 : 0;
+  }, 200);
+}
 
 function activate(el){
-  const mode = el.dataset.step, nav = el.dataset.nav;
+  const mode   = el.dataset.step, nav = el.dataset.nav;
+  const kicker = el.dataset.kicker || "";
+  const title  = el.dataset.title  || "";
   if (!dataReady){ pendingStep = el; return; }
   if (currentMode === mode) return;
   steps.forEach(s => s.classList.toggle("is-active", s === el));
+  setHeader(kicker, title);
+  vizHint.style.opacity = mode === "hero" ? .55 : 0;
   currentMode = mode;
   if (MODES[mode]) MODES[mode]();
   const idx = NAV_ORDER.indexOf(nav);
-  railSteps.forEach((b, i) => {
-    b.classList.toggle("is-active", NAV_ORDER.indexOf(b.dataset.goto) === idx);
-    b.classList.toggle("is-done",   NAV_ORDER.indexOf(b.dataset.goto) < idx);
+  railSteps.forEach(b => {
+    const bIdx = NAV_ORDER.indexOf(b.dataset.goto);
+    b.classList.toggle("is-active", bIdx === idx);
+    b.classList.toggle("is-done",   bIdx <  idx);
   });
-  const denom = NAV_ORDER.length - 2;   // steps between Data and Equity
-  const fillIdx = Math.max(0, idx - 1);
-  // cap at 84% so the fill line stops at the last dot rather than overshooting
-  document.getElementById("railFill").style.height =
-    `${Math.min(84, (fillIdx / denom) * 84)}%`;
 }
 
 const io = new IntersectionObserver(entries => {
-  // pick the entry whose intersection center is closest to viewport middle
   let best = null, bestDist = Infinity;
   entries.forEach(e => {
     if (!e.isIntersecting) return;
@@ -1110,10 +843,9 @@ const io = new IntersectionObserver(entries => {
     if (d < bestDist){ bestDist = d; best = e.target; }
   });
   if (best) activate(best);
-}, { root: narrative, threshold: [0.35, 0.55, 0.75], rootMargin: "-20% 0px -20% 0px" });
+}, { threshold: [0.3, 0.5, 0.7], rootMargin: "-25% 0px -25% 0px" });
 steps.forEach(s => io.observe(s));
 
-/* rail clicks — scroll narrative to first step of that nav group */
 railSteps.forEach(b => b.addEventListener("click", () => {
   const target = steps.find(s => s.dataset.nav === b.dataset.goto);
   if (target) target.scrollIntoView({
@@ -1122,29 +854,10 @@ railSteps.forEach(b => b.addEventListener("click", () => {
 }));
 
 /* ============================================================
-   WHEEL REDIRECTION  — scrolling over the viz scrolls the narrative
-   ============================================================ */
-vizEl.addEventListener("wheel", e => {
-  narrative.scrollTop += e.deltaY;
-  e.preventDefault();
-}, { passive: false });
-
-/* keyboard scrolling for accessibility */
-window.addEventListener("keydown", e => {
-  const step = window.innerHeight * 0.9;
-  if (e.key === "ArrowDown" || e.key === "PageDown"){
-    narrative.scrollTop += step; e.preventDefault();
-  } else if (e.key === "ArrowUp" || e.key === "PageUp"){
-    narrative.scrollTop -= step; e.preventDefault();
-  } else if (e.key === "Home"){ narrative.scrollTop = 0; e.preventDefault(); }
-    else if (e.key === "End"){ narrative.scrollTop = narrative.scrollHeight; e.preventDefault(); }
-});
-
-/* ============================================================
    DATA LOAD
    ============================================================ */
 sizeCanvas();
-vizTitle.textContent = "Loading data…";
+setHeader("", "Loading…");
 
 Promise.all([
   d3.json("calgary.geojson"),
@@ -1165,25 +878,25 @@ Promise.all([
   window.__ejRows = ej;
   dataReady = true;
 
-  // metrics in the prose
   const n  = cal.features.length;
   const nf = cal.features.filter(f => +f.properties.Inundation === 1).length;
-  setText("mBase",  (100 * nf / n).toFixed(1) + "%");
+  setText("mBase",   (100 * nf / n).toFixed(1) + "%");
   setText("mThresh", STATS.threshold.toFixed(3));
   setText("mSens",   STATS.spatial.sens.toFixed(2));
   setText("mAuc",    STATS.spatial.auc.toFixed(2));
   setText("mBal",    STATS.balAcc.toFixed(2));
-  setText("mEjD", "r = +" + STATS.ej.denver.r.toFixed(2));
-  setText("mEjM", "r = "  + (STATS.ej.mpls.r >= 0 ? "+" : "") + STATS.ej.mpls.r.toFixed(2));
+  setText("mEjD",    "r = +" + STATS.ej.denver.r.toFixed(2));
+  setText("mEjM",    "r = "  + (STATS.ej.mpls.r >= 0 ? "+" : "") + STATS.ej.mpls.r.toFixed(2));
 
-  // initial state
-  showCity("calgary", "Calgary, Alberta", "Study area");
+  showCity("calgary");
   MODES.hero();
   currentMode = "hero";
+  setHeader("", "");   // hero has no viz header
+  vizHint.style.opacity = .55;
 
   if (pendingStep){ const s = pendingStep; pendingStep = null; activate(s); }
 }).catch(err => {
-  vizTitle.textContent = "Data not found. Serve docs/ over http.";
+  setHeader("", "Data load failed");
   console.error(err);
 });
 
